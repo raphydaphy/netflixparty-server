@@ -1,5 +1,6 @@
 const express = require("express");
 const mysql = require("mysql");
+const path = require("path");
 const app = express();
 
 var http = require("http").createServer(app);
@@ -49,10 +50,11 @@ con.connect(function(err) {
     console.log("Performing initial database setup...");
     var sql = `
       CREATE TABLE users ( 
-        id INT NOT NULL AUTO_INCREMENT COMMENT "unique user id", 
-        name VARCHAR(16) NOT NULL COMMENT "nickname", 
-        icon VARCHAR(64) NOT NULL COMMENT "profile picture filename", 
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT "account creation timestamp", 
+        id INT NOT NULL AUTO_INCREMENT COMMENT "unique user id",
+        token VARCHAR(16) NOT NULL COMMENT "used for authentication",
+        name VARCHAR(16) NOT NULL COMMENT "nickname",
+        icon VARCHAR(64) NOT NULL COMMENT "profile picture filename",
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT "account creation timestamp",
         PRIMARY KEY (id)
       ) 
       ENGINE = InnoDB
@@ -74,17 +76,25 @@ app.get("/", function(req, res) {
   res.send("OK");
 });
 
+// Not for production
+app.get("/test", function(req, res) {
+  res.sendFile(path.join(__dirname, "test.html"));
+});
+
 app.get("/create-user", function(req,res) {
   res.setHeader("Content-Type", "text/json");
 
+  // A 64 bit hash used to authenticate users
+  var token = hash64();
   // Use a default username if no name is provided
   var name = req.query.name || usernames[Math.floor(Math.random() * usernames.length)];
+  // A random profile icon is picked when the account is created
   var icon = icons[Math.floor(Math.random() * icons.length)];
 
   // Name has a maximum length of 16 characters in the database
   name = name.substring(0, 16);
 
-  var sql = `INSERT INTO users (name, icon) VALUES ("${name}", "${icon}")`;
+  var sql = `INSERT INTO users (token, name, icon) VALUES ("${token}", "${name}", "${icon}")`;
   con.query(sql, function(err, result) {
     if (err) {
       res.send({error: err });
@@ -93,6 +103,7 @@ app.get("/create-user", function(req,res) {
     console.log("Created user #" + result.insertId);
     res.send({
       id: result.insertId,
+      token: token,
       name: name,
       icon: icon
     });
@@ -101,17 +112,47 @@ app.get("/create-user", function(req,res) {
 
 app.post("/log-event", function(req, res) {
   // TODO: logging
-  console.log(req.body);
+  console.log("Log Event: ", req.body);
+});
+
+app.post("/log-summary", function(req, res) {
+  // TODO: summary log
+  console.log("Log Summary: ", req.body);
 });
 
 /****************
  * Socket Events
  ****************/
 
-io.on("connection", function(socket) {
-  socket.emit("userId", {
-    userId: "0"
+io.use((socket, next) => {
+  var id = socket.handshake.query.id;
+  var token = socket.handshake.query.token;
+
+  if (id == undefined) {
+    console.warn("Ignoring socket connection ");
+    return next(new Error("Missing user ID"));
+  }
+
+  var sql = `SELECT token FROM users WHERE id="${id}"`;
+  con.query(sql, function(err, result, fields) {
+    if (err) throw err;
+    if (result.length > 0) {
+      var realToken = result[0].token;
+      if (realToken == token) {
+        return next();
+      }
+      console.warn(`Ignoring authentication attempt from user #${id} with invalid token "${token}" (expected "${realToken}")`);
+      return next(new Error("Invalid token"));
+    }
+    console.warn(`Ignoring authentication attempt from invalid user #${id}`);
+    next(new Error("Invalid user ID"));
   });
+});
+
+io.on("connection", function(socket) {
+  var userId = socket.handshake.query.id;
+
+  console.log("Connected with id " + userId);
 });
 
 /*************
