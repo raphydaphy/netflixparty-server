@@ -15,8 +15,6 @@ app.use(express.json())
 const usernames = ["James", "Hannah", "Tracy", "Bob", "Troy", "George", "Eve"];
 const icons = ["Batman", "DeadPool", "CptAmerica", "Wolverine", "IronMan", "Goofy", "Alien", "Mulan", "Snow-White", "Poohbear", "Sailormoon", "Sailor-Cat", "Pizza", "Cookie", "Chocobar", "hotdog", "Hamburger", "Popcorn", "IceCream", "ChickenLeg"];
 
-const setupDb = process.argv.includes("--setupdb");
-
 /***************************
  * Generic Helper Functions
  ***************************/
@@ -36,9 +34,9 @@ function hash64() {
  **********************/
 
 var con = mysql.createConnection({
-  host: "localhost",
+  host: process.env.MYSQL_HOST || "localhost",
   user: process.env.MYSQL_USER || "netflixparty",
-  password: process.env.MYSQL_PASSWORD || "password",
+  password: process.env.MYSQL_PASS || "password",
   database: "netflixparty"
 });
 
@@ -46,7 +44,8 @@ con.connect(function(err) {
   if (err) throw err;
   console.log("Connected to the MySQL Database!");
 
-  if (setupDb) {
+  // Automatically create the necessary tables when the --setupdb argument is used
+  if (process.argv.includes("--setupdb")) {
     console.log("Performing initial database setup...");
     var sql = `
       CREATE TABLE users ( 
