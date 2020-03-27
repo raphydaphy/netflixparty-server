@@ -16,9 +16,9 @@ app.use(express.json())
 const usernames = ["James", "Hannah", "Tracy", "Bob", "Troy", "George", "Eve"];
 const icons = ["Batman", "DeadPool", "CptAmerica", "Wolverine", "IronMan", "Goofy", "Alien", "Mulan", "Snow-White", "Poohbear", "Sailormoon", "Sailor-Cat", "Pizza", "Cookie", "Chocobar", "hotdog", "Hamburger", "Popcorn", "IceCream", "ChickenLeg"];
 
-/***************************
- * Generic Helper Functions
- ***************************/
+/*******************
+ * Helper Functions
+ *******************/
 
 // generate a random hash with 64 bits of entropy
 function hash64() {
@@ -28,6 +28,22 @@ function hash64() {
     result += hexChars[Math.floor(Math.random() * 16)];
   }
   return result;
+}
+
+function isEnabled(argument, envVar) {
+  return process.argv.includes("--" + argument);
+}
+
+function getToken(userId, fn) {
+  if (userId == undefined) return fn(undefined);
+  var sql = `SELECT token FROM users WHERE id="${userId}"`;
+  con.query(sql, function(err, result, fields) {
+    if (err) throw err;
+    if (result.length > 0) {
+      return fn(result[0].token);
+    }
+    fn(undefined);
+  });
 }
 
 /**********************
@@ -46,7 +62,7 @@ con.connect(function(err) {
   console.log("Connected to the MySQL Database!");
 
   // Automatically create the necessary tables when the requested
-  if (process.argv.includes("--setupdb") || process.env.SETUP_DB == "SETUP_DB") {
+  if (isEnabled("setupdb") || process.env.SETUP_DB == "SETUP_DB") {
     console.log("Performing initial database setup...");
     var sql = `
       CREATE TABLE users ( 
@@ -73,21 +89,21 @@ con.connect(function(err) {
 
 app.get("/", function(req, res) {
   res.setHeader("Content-Type", "text/plain");
-  res.send("OK");
+  res.end("OK");
 });
 
 // Not for production
-app.get("/test", function(req, res) {
-  res.sendFile(path.join(__dirname, "test.html"));
-});
+if (isEnabled("test")) {
+  app.get("/test", function(req, res) {
+    res.sendFile(path.join(__dirname, "test.html"));
+  });
+}
 
-app.get("/create-user", function(req,res) {
-  res.setHeader("Content-Type", "text/json");
-
+app.post("/create-user", function(req,res) {
   // A 64 bit hash used to authenticate users
   var token = hash64();
   // Use a default username if no name is provided
-  var name = req.query.name || usernames[Math.floor(Math.random() * usernames.length)];
+  var name = req.body.name || usernames[Math.floor(Math.random() * usernames.length)];
   // A random profile icon is picked when the account is created
   var icon = icons[Math.floor(Math.random() * icons.length)];
 
@@ -97,7 +113,7 @@ app.get("/create-user", function(req,res) {
   var sql = `INSERT INTO users (token, name, icon) VALUES ("${token}", "${name}", "${icon}")`;
   con.query(sql, function(err, result) {
     if (err) {
-      res.send({error: err });
+      res.send({error: err});
       throw err;
     }
     console.log("Created user #" + result.insertId);
@@ -109,6 +125,20 @@ app.get("/create-user", function(req,res) {
     });
   });
 });
+
+app.post("/validate-token", function(req, res) {
+  var userId = req.body.userid;
+  var token = req.body.token;
+
+  if (userId == undefined) return res.send({result: "missing-user"});
+  if (token == undefined) return res.send({result: "missing-token"});
+
+  getToken(userId, function(realToken) {
+    if (realToken == undefined) return res.send({result: "invalid-user"});
+    if (realToken == token) return res.send({result: "success"});
+    return res.send({result: "invalid-token"});
+  });
+})
 
 app.post("/log-event", function(req, res) {
   // TODO: logging
@@ -125,32 +155,26 @@ app.post("/log-summary", function(req, res) {
  ****************/
 
 io.use((socket, next) => {
-  var id = socket.handshake.query.id;
+  var id = socket.handshake.query.userid;
   var token = socket.handshake.query.token;
 
-  if (id == undefined) {
-    console.warn("Ignoring socket connection ");
-    return next(new Error("Missing user ID"));
+  if (id == undefined || token == undefined) {
+    console.warn("Recieved connection with missing credentials");
+    return next(new Error("Missing credentials"));
   }
-
-  var sql = `SELECT token FROM users WHERE id="${id}"`;
-  con.query(sql, function(err, result, fields) {
-    if (err) throw err;
-    if (result.length > 0) {
-      var realToken = result[0].token;
-      if (realToken == token) {
-        return next();
-      }
-      console.warn(`Ignoring authentication attempt from user #${id} with invalid token "${token}" (expected "${realToken}")`);
-      return next(new Error("Invalid token"));
+  getToken(id, function(realToken) {
+    if (realToken == undefined) {
+      console.warn(`Recieved connection from invalid user #${id}`);
+      return next(new Error("Invalid user"));
     }
-    console.warn(`Ignoring authentication attempt from invalid user #${id}`);
-    next(new Error("Invalid user ID"));
+    if (token == realToken) return next();
+    console.warn(`Recieved connection for user #${id} with invalid token "${token}" (expected "${realToken}"`);
+    next(new Error("Invalid token"));
   });
 });
 
 io.on("connection", function(socket) {
-  var userId = socket.handshake.query.id;
+  var userId = socket.handshake.query.userid;
 
   console.log("Connected with id " + userId);
 });
