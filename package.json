@@ -4,7 +4,8 @@
   "description": "A custom implementation of the NetflixParty server",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node index.js --test"
   },
   "repository": {
     "type": "git",

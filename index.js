@@ -8,17 +8,37 @@ var io = require("socket.io")(http);
 
 app.use(express.json())
 
-/****************
- * Initial Setup
- ****************/
+/*****************
+ * Initial Setup *
+ *****************/
 
 // An array of default usernames
 const usernames = ["James", "Hannah", "Tracy", "Bob", "Troy", "George", "Eve"];
 const icons = ["Batman", "DeadPool", "CptAmerica", "Wolverine", "IronMan", "Goofy", "Alien", "Mulan", "Snow-White", "Poohbear", "Sailormoon", "Sailor-Cat", "Pizza", "Cookie", "Chocobar", "hotdog", "Hamburger", "Popcorn", "IceCream", "ChickenLeg"];
 
-/*******************
- * Helper Functions
- *******************/
+/**
+ * User:
+ *  - id (int)
+ *  - name (string)
+ *  - icon (string)
+ *  - typing (bool)
+ *  - active (bool)
+ *  - sessionId (hash)
+ *  - socket (<socket>)
+ **/
+var users = {};
+
+/**
+ * Session:
+ *  - id (hash)
+ *  - users (int[])
+ *  - videoId (int)
+ **/
+var sessions = {};
+
+/********************
+ * Helper Functions *
+ ********************/
 
 // generate a random hash with 64 bits of entropy
 function hash64() {
@@ -46,9 +66,9 @@ function getToken(userId, fn) {
   });
 }
 
-/**********************
- * Database Connection
- **********************/
+/***********************
+ * Database Connection *
+ ***********************/
 
 var con = mysql.createConnection({
   host: process.env.MYSQL_HOST || "localhost",
@@ -83,9 +103,9 @@ con.connect(function(err) {
   }
 });
 
-/****************
- * Web Endpoints
- ****************/
+/*****************
+ * Web Endpoints *
+ *****************/
 
 app.get("/", function(req, res) {
   res.setHeader("Content-Type", "text/plain");
@@ -150,9 +170,9 @@ app.post("/log-summary", function(req, res) {
   console.debug("Log Summary: ", req.body);
 });
 
-/****************
- * Socket Events
- ****************/
+/*****************
+ * Socket Events *
+ *****************/
 
 io.use((socket, next) => {
   var id = socket.handshake.query.userid;
@@ -176,12 +196,22 @@ io.use((socket, next) => {
 io.on("connection", function(socket) {
   var userId = socket.handshake.query.userid;
 
-  console.debug("Connected with id " + userId);
+  console.debug("Connected with id #" + userId);
+
+  // Fetch the users icon & name from the database
+  var sql = `SELECT name, icon FROM users WHERE id="${userId}"`;
+  con.query(sql, function(err, result, fields) {
+    if (err) throw err;
+    socket.emit("init", {
+      userName: result[0].name,
+      userIcon: result[0].icon
+    });
+  });
 });
 
-/*************
- * Web Server
- *************/
+/**************
+ * Web Server *
+ **************/
 
 var server = http.listen(process.env.PORT || 3000, function() {
   console.log("Listening on port %d.", server.address().port);

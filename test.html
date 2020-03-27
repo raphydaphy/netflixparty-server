@@ -13,8 +13,8 @@
 			console.warn("Authentication error: " + data);
 		});
 
-		socket.on("connect", () => {
-			console.log("Connected!");
+		socket.on("init", data => {
+			console.log("Connected as " + data.userName + " with icon " + data.userIcon + "!");
 		});
 	</script>
 </body>
