@@ -37,7 +37,7 @@ var con = mysql.createConnection({
   host: process.env.MYSQL_HOST || "localhost",
   user: process.env.MYSQL_USER || "netflixparty",
   password: process.env.MYSQL_PASS || "password",
-  database: "netflixparty"
+  database: process.env.MYSQL_DB || "netflixparty"
 });
 
 con.connect(function(err) {
