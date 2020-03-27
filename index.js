@@ -142,12 +142,12 @@ app.post("/validate-token", function(req, res) {
 
 app.post("/log-event", function(req, res) {
   // TODO: logging
-  console.log("Log Event: ", req.body);
+  console.debug("Log Event: ", req.body);
 });
 
 app.post("/log-summary", function(req, res) {
   // TODO: summary log
-  console.log("Log Summary: ", req.body);
+  console.debug("Log Summary: ", req.body);
 });
 
 /****************
@@ -159,24 +159,24 @@ io.use((socket, next) => {
   var token = socket.handshake.query.token;
 
   if (id == undefined || token == undefined) {
-    console.warn("Recieved connection with missing credentials");
+    console.log("Recieved connection with missing credentials");
     return next(new Error("Missing credentials"));
   }
   getToken(id, function(realToken) {
     if (realToken == undefined) {
-      console.warn(`Recieved connection from invalid user #${id}`);
+      console.log(`Recieved connection from invalid user #${id}`);
       return next(new Error("Invalid user"));
     }
     if (token == realToken) return next();
-    console.warn(`Recieved connection for user #${id} with invalid token "${token}" (expected "${realToken}"`);
-    next(new Error("Invalid token"));
+    console.log(`Recieved connection for user #${id} with invalid token "${token}" (expected "${realToken}"`);
+    return next(new Error("Invalid token"));
   });
 });
 
 io.on("connection", function(socket) {
   var userId = socket.handshake.query.userid;
 
-  console.log("Connected with id " + userId);
+  console.debug("Connected with id " + userId);
 });
 
 /*************

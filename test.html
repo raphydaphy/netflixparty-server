@@ -8,6 +8,14 @@
 	<h1>NetflixParty Server Test</h1>
 	<script>
 		var socket = io("http://localhost:3000?userid=1&token=3791c5ec9bbd4fe6");
+
+		socket.on("error", data => {
+			console.warn("Authentication error: " + data);
+		});
+
+		socket.on("connect", () => {
+			console.log("Connected!");
+		});
 	</script>
 </body>
 </html>
