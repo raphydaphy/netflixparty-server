@@ -1,0 +1,23 @@
+{
+  "name": "netflixparty-server",
+  "version": "2.0.0",
+  "description": "A custom implementation of the NetflixParty server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/raphydaphy/netflixparty-server.git"
+  },
+  "author": "raphydaphy",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/raphydaphy/netflixparty-server/issues"
+  },
+  "homepage": "https://github.com/raphydaphy/netflixparty-server#readme",
+  "dependencies": {
+    "express": "4.17.1",
+    "socket.io": "2.3.0"
+  }
+}
