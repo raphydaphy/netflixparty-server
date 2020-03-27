@@ -44,8 +44,8 @@ con.connect(function(err) {
   if (err) throw err;
   console.log("Connected to the MySQL Database!");
 
-  // Automatically create the necessary tables when the --setupdb argument is used
-  if (process.argv.includes("--setupdb")) {
+  // Automatically create the necessary tables when the requested
+  if (process.argv.includes("--setupdb") || process.env.SETUP_DB == "SETUP_DB") {
     console.log("Performing initial database setup...");
     var sql = `
       CREATE TABLE users ( 
