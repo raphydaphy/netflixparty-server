@@ -1,8 +1,21 @@
 const express = require("express");
+const mysql = require("mysql");
 const app = express();
 
 var http = require("http").createServer(app);
 var io = require("socket.io")(http);
+
+app.use(express.json())
+
+/****************
+ * Initial Setup
+ ****************/
+
+// An array of default usernames
+const usernames = ["James", "Hannah", "Tracy", "Bob", "Troy", "George", "Eve"];
+const icons = ["Batman", "DeadPool", "CptAmerica", "Wolverine", "IronMan", "Goofy", "Alien", "Mulan", "Snow-White", "Poohbear", "Sailormoon", "Sailor-Cat", "Pizza", "Cookie", "Chocobar", "hotdog", "Hamburger", "Popcorn", "IceCream", "ChickenLeg"];
+
+const setupDb = process.argv.includes("--setupdb");
 
 /***************************
  * Generic Helper Functions
@@ -18,13 +31,78 @@ function hash64() {
   return result;
 }
 
+/**********************
+ * Database Connection
+ **********************/
+
+var con = mysql.createConnection({
+  host: "localhost",
+  user: process.env.MYSQL_USER || "netflixparty",
+  password: process.env.MYSQL_PASSWORD || "password",
+  database: "netflixparty"
+});
+
+con.connect(function(err) {
+  if (err) throw err;
+  console.log("Connected to the MySQL Database!");
+
+  if (setupDb) {
+    console.log("Performing initial database setup...");
+    var sql = `
+      CREATE TABLE users ( 
+        id INT NOT NULL AUTO_INCREMENT COMMENT "unique user id", 
+        name VARCHAR(16) NOT NULL COMMENT "nickname", 
+        icon VARCHAR(64) NOT NULL COMMENT "profile picture filename", 
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT "account creation timestamp", 
+        PRIMARY KEY (id)
+      ) 
+      ENGINE = InnoDB
+      COMMENT = "persistent user storage";
+    `;
+    con.query(sql, function(err, result) {
+      if (err) throw err;
+      console.log("Successfully created users table!");
+    });
+  }
+});
+
 /****************
  * Web Endpoints
  ****************/
 
 app.get("/", function(req, res) {
-  res.setHeader('Content-Type', 'text/plain');
-  res.send('OK');
+  res.setHeader("Content-Type", "text/plain");
+  res.send("OK");
+});
+
+app.get("/create-user", function(req,res) {
+  res.setHeader("Content-Type", "text/json");
+
+  // Use a default username if no name is provided
+  var name = req.query.name || usernames[Math.floor(Math.random() * usernames.length)];
+  var icon = icons[Math.floor(Math.random() * icons.length)];
+
+  // Name has a maximum length of 16 characters in the database
+  name = name.substring(0, 16);
+
+  var sql = `INSERT INTO users (name, icon) VALUES ("${name}", "${icon}")`;
+  con.query(sql, function(err, result) {
+    if (err) {
+      res.send({error: err });
+      throw err;
+    }
+    console.log("Created user #" + result.insertId);
+    res.send({
+      id: result.insertId,
+      name: name,
+      icon: icon
+    });
+  });
+});
+
+app.post("/log-event", function(req, res) {
+  // TODO: logging
+  console.log(req.body);
 });
 
 /****************
