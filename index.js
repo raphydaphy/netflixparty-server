@@ -423,7 +423,10 @@ io.on("connection", function(socket) {
     var error = getSessionInfoError(userId, data.videoService, data.videoId);
     if (error) return fn({error: error});
     var sessionId = data.id;
-    if (!sessionExists(sessionId)) return fn({error: "Invalid session ID"});
+    if (!sessionExists(sessionId)) {
+      console.warn("Invalid session id", sessionId);
+      return fn({error: "Invalid session ID"});
+    }
 
     var session = sessions[sessionId];
     if (session.videoService != data.videoService) {
@@ -499,6 +502,35 @@ io.on("connection", function(socket) {
     var message = broadcastMessage(userId, data.content, data.isSystemMsg || false);
 
     fn({ message: message });
+  });
+
+  socket.on("likeMessage", function(data) {
+    if (!userExists(userId)) return fn({error: "Invalid user ID"});
+    var user = users[userId];
+    if (!sessionExists(user.sessionId)) return fn({error: "Invalid session"});
+    var session = sessions[user.sessionId];
+    if (!session.messages.hasOwnProperty(data.msgId)) {
+      console.warn("User " + userId + " tried to like invalid message " + data.msgId);
+      return;
+    }
+    var timestamp = Date.now();
+    var msg = session.messages[data.msgId];
+    if (msg.likes.hasOwnProperty(userId)) {
+      var name = users[userId].name;
+      console.log("User " + name + " tried to like a message they had already liked (with " + Object.keys(msg.likes).length + ") total likes", msg.likes);
+      return;
+    }
+    msg.likes[userId] = {
+      userId: userId,
+      timestamp: timestamp
+    };
+    for (var user in users) {
+      users[user].socket.emit("likeMessage", {
+        msgId: data.msgId,
+        userId: userId,
+        timestamp: timestamp
+      });
+    }
   });
 });
 
