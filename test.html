@@ -14,7 +14,7 @@
 		});
 
 		socket.on("init", data => {
-			console.log("Connected as " + data.userName + " with icon " + data.userIcon + "!");
+			console.log(`Connected as ${data.userName} with icon ${data.userIcon} and id #${data.userId}!`);
 		});
 	</script>
 </body>

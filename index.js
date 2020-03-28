@@ -203,8 +203,12 @@ io.on("connection", function(socket) {
 
   if (socket.handshake.query.incognito == "true") {
     createUser(undefined, data => {
+      if (data.error) {
+        return console.warn("Failed to create temporary incognito account!", data.error);
+      }
       userId = data.id;
       socket.emit("init", {
+        userId: userId,
         userName: data.name,
         userIcon: data.icon
       });
@@ -216,6 +220,7 @@ io.on("connection", function(socket) {
     con.query(sql, function(err, result, fields) {
       if (err) throw err;
       socket.emit("init", {
+        userId: userId,
         userName: result[0].name,
         userIcon: result[0].icon
       });
