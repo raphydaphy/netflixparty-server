@@ -131,3 +131,7 @@ a:active {
   outline: none;
   border-bottom: 1.2px solid;
 }
+
+#presence-indicator {
+  font-size: 12px;
+}

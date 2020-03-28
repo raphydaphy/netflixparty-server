@@ -247,14 +247,19 @@ function broadcastMessage(userId, content, isSystemMsg, ignoreSender=true) {
   return message;
 }
 
-function getMessageInfo(userId, msgId) {
+function getSession(userId) {
   if (!userExists(userId)) return {error: "Invalid user ID"};
   var user = users[userId];
   if (!sessionExists(user.sessionId)) return {error: "Invalid session"};
-  var session = sessions[user.sessionId];
+  return sessions[user.sessionId];
+}
+
+function getMessageInfo(userId, msgId) {
+  var session = getSession(userId);
+  if (session.error) return session;
   if (!session.messages.hasOwnProperty(msgId)) return {error: "Invalid message"};
   return {
-    user: user,
+    user: session.user,
     session: session,
     message: session.messages[msgId]
   };
@@ -551,6 +556,20 @@ io.on("connection", function(socket) {
         users[sessionUser].socket.emit("unlikeMessage", {
           msgId: data.msgId,
           userId: userId
+        });
+      }
+    });
+  });
+
+  socket.on("typing", function(data) {
+    var session = getSession(userId);
+    if (session.error) return console.debug("Failed to update typing status:", session.error);
+    users[userId].typing = data.typing;
+    session.users.forEach(sessionUser => {
+      if (sessionUser != userId && users[sessionUser].sessionId == session.id) {
+        users[sessionUser].socket.emit("typing", {
+          userId: userId,
+          typing: data.typing
         });
       }
     });

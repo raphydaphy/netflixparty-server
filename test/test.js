@@ -4,6 +4,8 @@ var userId;
 var session;
 var users = {};
 
+var typingTimer = null;
+
 jQuery(".data").text("undefined");
 jQuery(".session-input").attr("placeholder", "undefined");
 
@@ -232,12 +234,33 @@ function initSocket(args) {
     addMessage(data.message);
   });
 
-  socket.on("likeMessage", function(data) {
-    addLike(data);
-  });
+  socket.on("likeMessage", data => addLike(data));
+  socket.on("unlikeMessage", data => removeLike(data));
 
-  socket.on("unlikeMessage", function(data) {
-    removeLike(data);
+  socket.on("typing", data => {
+    if (!session) {
+      return console.error("Recieved typing status despite not being in a session", data);
+    } else if (!users.hasOwnProperty(data.userId)) {
+      return console.warn("Tried to update typing status for unknown user #" + data.userId);
+    } else if (!session.users.includes(data.userId)) {
+      return console.error("Recieved typing status from user in a different session", data);
+    }
+    users[data.userId].typing = data.typing;
+    var typingUsers = [];
+    for (var user in users) {
+      if (users[user].typing) {
+        typingUsers.push(user);
+      }
+    }
+    var typingMsg = typingUsers.length + " people are typing...";
+    if (typingUsers.length == 2) {
+      typingMsg = users[typingUsers[0]].name + " and " + users[typingUsers[1]].name + " are typing...";
+    } else if (typingUsers.length == 1) {
+      typingMsg = users[typingUsers[0]].name + " is typing...";
+    } else if (typingUsers.length == 0) {
+      typingMsg = "<br />";
+    }
+    jQuery("#presence-indicator").html(typingMsg);
   });
  }
 
@@ -304,19 +327,41 @@ function leaveSession() {
 jQuery("#chat-input").keyup(function(e) {
   e.stopPropagation();
 
-  // 13 = enter key
+  // event keycode 13 is the enter key
   if (e.which === 13) {
-    var msgContent = jQuery("#chat-input").val();
-
-    jQuery("#chat-input").prop("disabled", true);
-    if (msgContent && msgContent.length > 0) {
+    var content = jQuery("#chat-input").val().replace(/^\s+|\s+$/g, "");
+    if (content !== "") {
+      if (typingTimer !== null) {
+        clearTimeout(typingTimer);
+        typingTimer = null;
+        socket.emit("typing", {
+          typing: false
+        });
+      }
+      
+      jQuery("#chat-input").prop("disabled", true);
       socket.emit("sendMessage", {
-        content: msgContent
-      }, response => {
+        content: content,
+        isSystemMsg: false
+      }, function() {
         jQuery("#chat-input").val("").prop("disabled", false).focus();
         if (response.error) return console.warn("Failed to send message:", response.error);
         addMessage(response.message);
       });
     }
+  } else {
+    if (typingTimer === null) {
+      socket.emit("typing", { 
+        typing: true 
+      });
+    } else {
+      clearTimeout(typingTimer);
+    }
+    typingTimer = setTimeout(function() {
+      typingTimer = null;
+      socket.emit("typing", { 
+        typing: false 
+      });
+    }, 500);
   }
 });
