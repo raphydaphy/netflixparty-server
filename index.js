@@ -54,6 +54,33 @@ function isEnabled(argument, envVar) {
   return process.argv.includes("--" + argument);
 }
 
+function createUser(name, fn) {
+  // A 64 bit hash used to authenticate users
+  var token = hash64();
+  // Use a default username if no name is provided
+  var name = name || usernames[Math.floor(Math.random() * usernames.length)];
+  // A random profile icon is picked when the account is created
+  var icon = icons[Math.floor(Math.random() * icons.length)];
+
+  // Name has a maximum length of 16 characters in the database
+  name = name.substring(0, 16);
+
+  var sql = `INSERT INTO users (token, name, icon) VALUES ("${token}", "${name}", "${icon}")`;
+  con.query(sql, function(err, result) {
+    if (err) {
+      fn({error: err});
+      throw err;
+    }
+    console.log("Created user #" + result.insertId);
+    fn({
+      id: result.insertId,
+      token: token,
+      name: name,
+      icon: icon
+    });
+  });
+}
+
 function getToken(userId, fn) {
   if (userId == undefined) return fn(undefined);
   var sql = `SELECT token FROM users WHERE id="${userId}"`;
@@ -120,30 +147,7 @@ if (isEnabled("test")) {
 }
 
 app.post("/create-user", function(req,res) {
-  // A 64 bit hash used to authenticate users
-  var token = hash64();
-  // Use a default username if no name is provided
-  var name = req.body.name || usernames[Math.floor(Math.random() * usernames.length)];
-  // A random profile icon is picked when the account is created
-  var icon = icons[Math.floor(Math.random() * icons.length)];
-
-  // Name has a maximum length of 16 characters in the database
-  name = name.substring(0, 16);
-
-  var sql = `INSERT INTO users (token, name, icon) VALUES ("${token}", "${name}", "${icon}")`;
-  con.query(sql, function(err, result) {
-    if (err) {
-      res.send({error: err});
-      throw err;
-    }
-    console.log("Created user #" + result.insertId);
-    res.send({
-      id: result.insertId,
-      token: token,
-      name: name,
-      icon: icon
-    });
-  });
+  createUser(req.body.name, (result) => res.send(result));
 });
 
 app.post("/validate-token", function(req, res) {
@@ -175,6 +179,7 @@ app.post("/log-summary", function(req, res) {
  *****************/
 
 io.use((socket, next) => {
+  if (socket.handshake.query.incognito == "true") return next();
   var id = socket.handshake.query.userid;
   var token = socket.handshake.query.token;
 
@@ -194,19 +199,28 @@ io.use((socket, next) => {
 });
 
 io.on("connection", function(socket) {
-  var userId = socket.handshake.query.userid;
+  var userId;
 
-  console.debug("Connected with id #" + userId);
-
-  // Fetch the users icon & name from the database
-  var sql = `SELECT name, icon FROM users WHERE id="${userId}"`;
-  con.query(sql, function(err, result, fields) {
-    if (err) throw err;
-    socket.emit("init", {
-      userName: result[0].name,
-      userIcon: result[0].icon
+  if (socket.handshake.query.incognito == "true") {
+    createUser(undefined, data => {
+      userId = data.id;
+      socket.emit("init", {
+        userName: data.name,
+        userIcon: data.icon
+      });
     });
-  });
+  } else {
+    userId = socket.handshake.query.userid;
+    // Fetch the users icon & name from the database
+    var sql = `SELECT name, icon FROM users WHERE id="${userId}"`;
+    con.query(sql, function(err, result, fields) {
+      if (err) throw err;
+      socket.emit("init", {
+        userName: result[0].name,
+        userIcon: result[0].icon
+      });
+    });
+  }
 });
 
 /**************
