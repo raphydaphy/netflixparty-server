@@ -11,6 +11,44 @@ window.addEventListener("beforeunload", (event) => {
   if (socket) socket.emit("userDisconnected");
 });
 
+function addLike(data, updateArray=true) {
+  if (!users.hasOwnProperty(data.userId)) {
+    console.warn("Recieved like from unknown user " + data.userId + " for message with id " + data.msgId);
+    return;
+  } else if (!session.messages.hasOwnProperty(data.msgId)) {
+    console.warn("User " + data.userId + " tried to like unknown message " + data.msgId);
+    return;
+  }
+
+  var msg = session.messages[data.msgId];
+
+  if (updateArray) {
+     msg.likes[data.userId] = {
+      userId: data.userId,
+      timestamp: data.timestamp
+    }; 
+  }
+
+  var msgHtml = jQuery("#msg-" + msg.id);
+  var userName = users[data.userId].name;
+
+  if (msgHtml.children("font")) {
+    msgHtml.children("font").first().append(" and " + userName)
+  } else {
+    msgHtml.append(`
+    <font size="1">Liked by ${users[data.userId].name}</font>
+  `);
+  }
+}
+
+function likeMessage(message) {
+  if (!message.likes.hasOwnProperty(userId) && !message.isSystemMsg) {
+    socket.emit("likeMessage", {
+      msgId: message.id
+    });
+  }
+}
+
 function addMessage(message) {
   session.messages[message.id] = message;
   var msgStr = `${users[message.userId].name}: ${message.content}`;
@@ -19,10 +57,19 @@ function addMessage(message) {
   }
   jQuery("#chat-history").append(`
     <div class="chat-message" id="msg-${message.id}">
-      ${msgStr}
+      <div class="msg-txt">${msgStr}</div>
     </div>
   `);
+
+  for (var like in message.likes) {
+    addLike({
+      msgId: message.id,
+      userId: like
+    }, false);
+  }
+
   jQuery("#chat-history").scrollTop(jQuery("#chat-history").prop("scrollHeight"));
+  jQuery("#msg-" + message.id).dblclick(e => likeMessage(message));
 }
 
 function addSessionUser(id, name) {
@@ -150,6 +197,10 @@ function initSocket(args) {
       return console.error("Recieved message from user in a different session", data.message);
     }
     addMessage(data.message);
+  });
+
+  socket.on("likeMessage", function(data) {
+    addLike(data);
   });
  }
 

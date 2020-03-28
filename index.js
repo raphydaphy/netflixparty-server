@@ -313,6 +313,10 @@ if (isEnabled("test")) {
   app.get("/test.css", function(req, res) {
     res.sendFile(path.join(__dirname, "test/test.css"));
   });
+
+  app.get("/icon.svg", function(req, res) {
+    res.sendFile(path.join(__dirname, "test/icon.svg"));
+  });
 }
 
 app.post("/create-user", function(req,res) {
@@ -524,13 +528,15 @@ io.on("connection", function(socket) {
       userId: userId,
       timestamp: timestamp
     };
-    for (var user in users) {
-      users[user].socket.emit("likeMessage", {
-        msgId: data.msgId,
-        userId: userId,
-        timestamp: timestamp
-      });
-    }
+    session.users.forEach(sessionUser => {
+      if (users[sessionUser].sessionId == session.id) {
+        users[sessionUser].socket.emit("likeMessage", {
+          msgId: data.msgId,
+          userId: userId,
+          timestamp: timestamp
+        });
+      }
+    });
   });
 });
 

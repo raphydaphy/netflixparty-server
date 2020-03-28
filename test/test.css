@@ -113,10 +113,6 @@ a:active {
 }
 
 .chat-message {
-  display: flex;
-  flex-flow: wrap row;
-  justify-content: space-between;
-  align-items: flex-start;
   padding: 6px 0;
   width: 100%;
 }
