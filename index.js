@@ -33,8 +33,9 @@ var users = {};
  *  - id (hash)
  *  - users (int[])
  *  - videoService (string)
- *  - ownerId (int)
  *  - videoId (int)
+ *  - ownerId (int)
+ *  - state (string)
  **/
 var sessions = {};
 
@@ -43,27 +44,38 @@ var sessions = {};
  *******************/
 
 function validateHash(id) {
-  return typeof id === 'string' && id.length === 16;
+  return typeof id === "string" && id.length === 16;
 }
 
 function validateLastKnownTime(lastKnownTime) {
-  return typeof lastKnownTime === 'number' && astKnownTime % 1 === 0 && lastKnownTime >= 0;
+  return typeof lastKnownTime === "number" && astKnownTime % 1 === 0 && lastKnownTime >= 0;
 }
 
 function validateTimestamp(timestamp) {
-  return typeof timestamp === 'number' && timestamp % 1 === 0 && timestamp >= 0;
+  return typeof timestamp === "number" && timestamp % 1 === 0 && timestamp >= 0;
 }
 
 function validateBoolean(boolean) {
-  return typeof boolean === 'boolean';
+  return typeof boolean === "boolean";
 }
 
 function validateState(state) {
-  return typeof state === 'string' && (state === 'playing' || state === 'paused');
+  return typeof state === "string" && (state === "playing" || state === "paused");
 }
 
 function validateVideoId(videoId) {
-  return typeof videoId === 'number' && videoId % 1 === 0 && videoId >= 0;
+  return typeof videoId === "number" && videoId % 1 === 0 && videoId >= 0;
+}
+
+function getSessionInfoError(userId, videoService, videoId) {
+  if (!userId || !users.hasOwnProperty(userId)) {
+    return "Invalid user ID";;
+  } else if (videoService != "netflix") {
+    return "Unsupported video service";
+  } else if (!validateVideoId(videoId)) {
+    return "Invalid video ID";
+  }
+  return null;
 }
 
 /********************
@@ -123,12 +135,37 @@ function getToken(userId, fn) {
   });
 }
 
+// Tries to remove the specified user from their current session
+// If they were the only active user left, the session is then deleted
+function leaveSession(userId) {
+  if (!userId || !users.hasOwnProperty(userId)) return;
+  var user = users[userId];
+  var sessionId = user.sessionId;
+  user.sessionId = null;
+  if (!sessionId || !sessions.hasOwnProperty(sessionId)) return;
+  var session = sessions[sessionId];
+  console.debug("User #" + userId + " left their session");
+  var sessionUsers = 0;
+  session.users.forEach(sessionUser => {
+    if (users[sessionUser].sessionId == sessionId) {
+      users[sessionUser].socket.emit("leaveSession", {
+        userId: userId
+      });
+      sessionUsers++;
+    }
+  });
+  if (sessionUsers == 0) {
+    console.debug("Everyone has left session #" + sessionId + ", deleting");
+    delete sessions[sessionId];
+  }
+}
+
 function setupUser(socket, id, name, icon) {
   console.debug("User #" + id + " connected");
   if (users.hasOwnProperty(id)) {
     var existingUser = users[id];
     if (existingUser.active) {
-      console.debug("User #" + id + " made multiple connections. Fixing...");
+      console.debug("User #" + id + " opened multiple connections");
       leaveSession(id);
       existingUser.socket.disconnect();
     }
@@ -147,27 +184,6 @@ function setupUser(socket, id, name, icon) {
     userName: name,
     userIcon: icon
   });
-}
-
-function leaveSession(userId) {
-  if (!userId || !users.hasOwnProperty(userId)) return;
-  var user = users[userId];
-  var sessionId = user.sessionId;
-  user.sessionId = null;
-  if (!sessionId || !sessions.hasOwnProperty(sessionId)) return;
-  var session = sessions[sessionId];
-  console.debug("User #" + userId + " left their session");
-  var sessionUsers = 0;
-  for (var sessionUser in session.users) {
-    if (users[sessionUser].sessionId == sessionId) {
-      sessionUsers++;
-    }
-    // TODO: broadcast "user left"
-  }
-  if (sessionUsers == 0) {
-    console.debug("Everyone has left session #" + sessionId + ", deleting");
-    delete sessions[sessionId];
-  }
 }
 
 /***********************
@@ -312,41 +328,80 @@ io.on("connection", function(socket) {
   }
 
   socket.on("createSession", (data, fn) => {
-    if (!userId || !users.hasOwnProperty(userId)) {
-      return fn({error: "Invalid user ID"});
-    } else if (data.videoService != "netflix") {
-      return fn({error: "Unsupported video service"});
-    } else if (!validateVideoId(data.videoId)) {
-      return fn({error: "Invalid video ID"});
-    }
+    var error = getSessionInfoError(userId, data.videoService, data.videoId);
+    if (error) return fn({error: error});
 
     var sessionId = hash64();
     var controlLock = validateBoolean(data.controlLock) ? data.controlLock : false;
     while (sessions.hasOwnProperty(sessionId)) sessionId = hash64();
 
-    console.log("User #" + userId + " created session #" + sessionId);
+    console.debug("User #" + userId + " created session #" + sessionId);
 
     var session = {
       id: sessionId,
-      users: {},
+      users: [userId],
       ownerId: data.controlLock ? userId : null,
       videoService: data.videoService,
       videoId: data.videoId
-    };
-
-    session.users[userId] = {
-      id: userId
     };
 
     users[userId].sessionId = sessionId;
     sessions[sessionId] = session;
 
     fn({
-      sessionId: session.id,
-      ownerId: session.ownerId,
-      videoService: session.videoService,
-      videoId: session.videoId
-    })
+      session: session
+    });
+  });
+
+  socket.on("joinSession", (data, fn) => {
+    var error = getSessionInfoError(userId, data.videoService, data.videoId);
+    if (error) return fn({error: error});
+    var sessionId = data.id;
+    if (!sessionId || !sessions.hasOwnProperty(sessionId)) {
+      return fn({error: "Invalid session ID"});
+    }
+
+    var session = sessions[sessionId];
+    if (session.videoService != data.videoService) {
+      return fn({error: "Video service does not match the session"});
+    } else if (session.videoId != data.videoId) {
+      return fn({error: "Video ID does not match the session"});
+    }
+
+    if (users[userId].sessionId) {
+      console.log("User #" + userId + " tried to join multiple sessions!");
+      leaveSession(users[userId].sessionId);
+    }
+
+    console.debug("User #" + userId + " joined session #" + sessionId);
+
+    var sessionUsers = {};
+    users[userId].sessionId = sessionId;
+    session.users.push(userId);
+
+    session.users.forEach(sessionUser => {
+      // Collate the existing users' data to send to the new user
+      sessionUsers[sessionUser] = {
+        id: sessionUser,
+        name: users[sessionUser].name,
+        icon: users[sessionUser].icon,
+        typing: users[sessionUser].typing,
+        active: users[sessionUser].active
+      }
+      // Send the new user's data to existing users
+      if (sessionUser != userId && users[sessionUser].sessionId == sessionId) {
+        users[sessionUser].socket.emit("joinSession", {
+          userId: userId,
+          userName: users[userId].name,
+          userIcon: users[userId].icon
+        });
+      }
+    });
+
+    fn({
+      session: session,
+      users: sessionUsers
+    });
   });
 
   socket.on("leaveSession", () => {

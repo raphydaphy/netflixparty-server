@@ -21,7 +21,11 @@
 
 			<p>Session</p>
 			<ul>
-				<li>ID: <input type="text" id="session-id" placeholder="undefined" /></li>
+				<li>ID: <input type="text" class="session-input" id="session-id" /></li>
+				<li>Video Service: <input type="text" class="session-input" id="session-service" value="netflix" /></li>
+				<li>Video ID: <input type="number" class="session-input" id="session-video" min="0" /></li>
+				<li>Control Lock: <input type="checkbox" id="session-lock" /></li>
+				<li id="session-owner-li" hidden>Owner ID: <span class="data" id="session-owner"></span></li>
 				<li id="session-users" hidden>Users<ul></ul></li>
 			</ul>
 		</fieldset>
