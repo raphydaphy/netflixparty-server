@@ -129,7 +129,7 @@ function createUser(name, fn) {
   name = name.substring(0, 16);
 
   var sql = `INSERT INTO users (token, name, icon) VALUES ("${token}", "${name}", "${icon}")`;
-  con.query(sql, function(err, result) {
+  con.query(sql, (err, result) => {
     if (err) {
       fn({error: err});
       throw err;
@@ -147,7 +147,7 @@ function createUser(name, fn) {
 function getToken(userId, fn) {
   if (!userId) return fn(null);
   var sql = `SELECT token FROM users WHERE id="${userId}"`;
-  con.query(sql, function(err, result, fields) {
+  con.query(sql, (err, result, fields) => {
     if (err) throw err;
     if (result.length > 0) {
       return fn(result[0].token);
@@ -276,7 +276,7 @@ var con = mysql.createConnection({
   database: process.env.MYSQL_DB || "netflixparty"
 });
 
-con.connect(function(err) {
+con.connect((err) => {
   if (err) throw err;
   console.log("Connected to the MySQL Database!");
 
@@ -295,7 +295,7 @@ con.connect(function(err) {
       ENGINE = InnoDB
       COMMENT = "persistent user storage";
     `;
-    con.query(sql, function(err, result) {
+    con.query(sql, (err, result) => {
       if (err) throw err;
       console.log("Successfully created users table!");
     });
@@ -306,12 +306,12 @@ con.connect(function(err) {
  * Web Endpoints *
  *****************/
 
-app.get("/", function(req, res) {
+app.get("/", (req, res) => {
   res.setHeader("Content-Type", "text/plain");
   res.end("OK");
 });
 
-app.get("/stats", function(req, res) {
+app.get("/stats", (req, res) => {
   res.send({
     "users": Object.keys(users).length,
     "sessions": Object.keys(sessions).length
@@ -320,43 +320,43 @@ app.get("/stats", function(req, res) {
 
 // Not for production
 if (isEnabled("test")) {
-  app.get("/test", function(req, res) {
+  app.get("/test", (req, res) => {
     res.sendFile(path.join(__dirname, "test/test.html"));
   });
 
-  app.get("/test.js", function(req, res) {
+  app.get("/test.js", (req, res) => {
     res.sendFile(path.join(__dirname, "test/test.js"));
   });
 
-  app.get("/test.css", function(req, res) {
+  app.get("/test.css", (req, res) => {
     res.sendFile(path.join(__dirname, "test/test.css"));
   });
 }
 
-app.post("/create-user", function(req,res) {
+app.post("/create-user", (req, res) => {
   createUser(req.body.name, (result) => res.send(result));
 });
 
-app.post("/validate-token", function(req, res) {
+app.post("/validate-token", (req, res) => {
   var userId = req.body.userid;
   var token = req.body.token;
 
   if (!userId) return res.send({result: "missing-user"});
   if (!token) return res.send({result: "missing-token"});
 
-  getToken(userId, function(realToken) {
+  getToken(userId, (realToken) => {
     if (!realToken) return res.send({result: "invalid-user"});
     if (realToken == token) return res.send({result: "success"});
     return res.send({result: "invalid-token"});
   });
 })
 
-app.post("/log-event", function(req, res) {
+app.post("/log-event", (req, res) => {
   // TODO: logging
   console.debug("Log Event: ", req.body);
 });
 
-app.post("/log-summary", function(req, res) {
+app.post("/log-summary", (req, res) => {
   // TODO: summary log
   console.debug("Log Summary: ", req.body);
 });
@@ -374,7 +374,7 @@ io.use((socket, next) => {
     console.log("Recieved connection with missing credentials");
     return next(new Error("Missing credentials"));
   }
-  getToken(id, function(realToken) {
+  getToken(id, (realToken) => {
     if (!realToken) {
       console.log(`Recieved connection from invalid user #${id}`);
       return next(new Error("Invalid user"));
@@ -385,7 +385,7 @@ io.use((socket, next) => {
   });
 });
 
-io.on("connection", function(socket) {
+io.on("connection", (socket) => {
   var userId;
 
   if (socket.handshake.query.incognito == "true") {
@@ -400,7 +400,7 @@ io.on("connection", function(socket) {
     userId = parseInt(socket.handshake.query.userid);
     // Fetch the users icon & name from the database
     var sql = `SELECT name, icon FROM users WHERE id="${userId}"`;
-    con.query(sql, function(err, result, fields) {
+    con.query(sql, (err, result, fields) => {
       if (err) throw err;
       setupUser(socket, userId, result[0].name, result[0].icon);
     });
@@ -522,7 +522,7 @@ io.on("connection", function(socket) {
     fn({ message: message });
   });
 
-  socket.on("likeMessage", function(data) {
+  socket.on("likeMessage", data => {
     var info = getMessageInfo(userId, data.msgId);
     if (info.error) return console.debug("Failed to like message:", info.error);
     var timestamp = Date.now();
@@ -544,7 +544,7 @@ io.on("connection", function(socket) {
     });
   });
 
-  socket.on("unlikeMessage", function(data) {
+  socket.on("unlikeMessage", data => {
     var info = getMessageInfo(userId, data.msgId);
     if (info.error) return console.debug("Failed to unlike message:", info.error);
     if (!info.message.likes.hasOwnProperty(userId)) {
@@ -561,7 +561,7 @@ io.on("connection", function(socket) {
     });
   });
 
-  socket.on("typing", function(data) {
+  socket.on("typing", data => {
     var session = getSession(userId);
     if (session.error) return console.debug("Failed to update typing status:", session.error);
     users[userId].typing = data.typing;
@@ -574,12 +574,49 @@ io.on("connection", function(socket) {
       }
     });
   });
+
+  socket.on("changeName", (data, fn) => {
+    if (!userExists(userId)) return console.debug("Invalid user ID");
+    if (!validateString(data.name)) return console.debug("Invalid name: " + data.name);
+
+    var user = users[userId];
+    var session = getSession(userId);
+    var message;
+
+    user.name = data.name;
+    if (!session.error) {
+      message = createMessage(userId, "changed their name", true);
+    }
+
+    var sql = `UPDATE users SET name="${user.name}" WHERE id="${userId}";`;
+    con.query(sql, (err, result) => {
+      if (err) throw err;
+      console.debug("Changed user #" + userId + "'s name to " + user.name);
+    });
+
+    fn({
+      name: user.name,
+      message: message
+    });
+
+    if (session.error) return;
+
+    session.users.forEach(sessionUser => {
+      if (sessionUser != user.id && users[sessionUser].sessionId == session.id) {
+        users[sessionUser].socket.emit("changeName", {
+          userId: user.id,
+          name: user.name,
+          message: message
+        });
+      }
+    });
+  });
 });
 
 /**************
  * Web Server *
  **************/
 
-var server = http.listen(process.env.PORT || 3000, function() {
+var server = http.listen(process.env.PORT || 3000, () => {
   console.log("Listening on port %d.", server.address().port);
 });

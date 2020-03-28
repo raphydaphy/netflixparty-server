@@ -7,11 +7,23 @@ var users = {};
 var typingTimer = null;
 
 jQuery(".data").text("undefined");
+jQuery(".user-input").attr("placeholder", "undefined");
 jQuery(".session-input").attr("placeholder", "undefined");
 
 window.addEventListener("beforeunload", (event) => {
   if (socket) socket.emit("userDisconnected");
 });
+
+function getUserStatus(id) {
+  if (!session) {
+    return {error: "Not in a session"};
+  } else if (!users.hasOwnProperty(id)) {
+    return {error: "Unknown user"};
+  } else if (!session.users.includes(id)) {
+    return {error: "Incorrect session"};
+  }
+  return {user: users[id]};
+}
 
 function removeLike(data) {
   if (!users.hasOwnProperty(data.userId)) {
@@ -107,6 +119,11 @@ function addMessage(message) {
   });
 }
 
+function updateName(id, name) {
+  users[id].name = name;
+  jQuery("#session-user-" + id).text(name);
+}
+
 function addSessionUser(id, name) {
   jQuery("#session-users").children("ul").first().append(`<li id="session-user-${id}">${name}</li>`);
 }
@@ -183,8 +200,8 @@ function initSocket(args) {
     userId = data.user.id;
     users[userId] = data.user;
     jQuery("#user-id").text(userId);
-    jQuery("#user-name").text(data.user.name);
-    jQuery("#user-icon").text(data.user.icon);
+    jQuery("#user-name").val(data.user.name);
+    jQuery("#user-icon").val(data.user.icon);
   });
 
   /******************
@@ -238,13 +255,8 @@ function initSocket(args) {
   socket.on("unlikeMessage", data => removeLike(data));
 
   socket.on("typing", data => {
-    if (!session) {
-      return console.error("Recieved typing status despite not being in a session", data);
-    } else if (!users.hasOwnProperty(data.userId)) {
-      return console.warn("Tried to update typing status for unknown user #" + data.userId);
-    } else if (!session.users.includes(data.userId)) {
-      return console.error("Recieved typing status from user in a different session", data);
-    }
+    var userStatus = getUserStatus(data.userId);
+    if (userStatus.error) return console.warn("Recieved invalid typing status", userStatus.error);
     users[data.userId].typing = data.typing;
     var typingUsers = [];
     for (var user in users) {
@@ -261,6 +273,13 @@ function initSocket(args) {
       typingMsg = "<br />";
     }
     jQuery("#presence-indicator").html(typingMsg);
+  });
+
+  socket.on("changeName", data => {
+    var userStatus = getUserStatus(data.userId);
+    if (userStatus.error) return console.warn("Recieved invalid name change:", userStatus.error);
+    addMessage(data.message);
+    updateName(data.userId, data.name);
   });
  }
 
@@ -279,7 +298,29 @@ function logout() {
   socket.emit("userDisconnected");
   socket = userId = session = null;
   jQuery(".data").text("undefined");
+  jQuery(".user-input").val("");
   endSession();
+}
+
+function changeName() {
+  var name = jQuery("#user-name").val().replace(/^\s+|\s+$/g, "");
+  if (!socket) {
+    return console.warn("Can't change name when not logged in!");
+  } else if (name == users[userId].name) {
+    return console.warn("The new name must be different in order to rename");
+  }
+  socket.emit("changeName", {
+    name: name
+  }, response => {
+    if (response.error) return console.warn("Failed to change name:", response.error);
+    console.debug("Changed name from " + users[userId].name + " to " + name);
+    if (session) addMessage(response.message);
+    updateName(userId, response.name);
+  });
+}
+
+function changeIcon() {
+
 }
 
 function createSession() {
@@ -343,7 +384,7 @@ jQuery("#chat-input").keyup(function(e) {
       socket.emit("sendMessage", {
         content: content,
         isSystemMsg: false
-      }, function() {
+      }, response => {
         jQuery("#chat-input").val("").prop("disabled", false).focus();
         if (response.error) return console.warn("Failed to send message:", response.error);
         addMessage(response.message);

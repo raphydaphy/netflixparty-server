@@ -16,8 +16,8 @@
 				<p>User</p>
 				<ul>
 					<li>ID: <span class="data" id="user-id"></span></li>
-					<li>Name: <span class="data" id="user-name"></span></li>
-					<li>Icon: <span class="data" id="user-icon"></span></li>
+					<li>Name: <input type="text" class="user-input" id="user-name"></li>
+					<li>Icon: <input type="text" class="user-input" id="user-icon"></li>
 				</ul>
 
 				<p>Session</p>
@@ -37,6 +37,12 @@
 				<li><a href="javascript:login()">Connect Normally</a></li>
 				<li><a href="javascript:loginIncognito()">Connect Anonymously</a></li>
 				<li><a href="javascript:logout()">Disconnect</a></li>
+			</ul>
+
+			<p>Account</p>
+			<ul>
+				<li><a href="javascript:changeName()">Change Name</a></li>
+				<li><a href="javascript:changeIcon()">Change Icon</a></li>
 			</ul>
 
 			<p>Sessions</p>
