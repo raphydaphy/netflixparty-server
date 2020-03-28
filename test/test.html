@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <title>NetflixParty Server Test</title>
+  <link rel="stylesheet" type="text/css" href="test.css" />
+  <script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+  <script src="./socket.io/socket.io.js"></script>
+</head>
+<body>
+	<div id="container">
+		<h1>NetflixParty Server Test</h1>
+
+		<fieldset>
+			<legend><b>Data</b></legend>
+			<p>User</p>
+			<ul>
+				<li>ID: <span class="data" id="user-id"></span></li>
+				<li>Name: <span class="data" id="user-name"></span></li>
+				<li>Icon: <span class="data" id="user-icon"></span></li>
+			</ul>
+
+			<p>Session</p>
+			<ul>
+				<li>ID: <input type="text" id="session-id" placeholder="undefined" /></li>
+				<li id="session-users" hidden>Users<ul></ul></li>
+			</ul>
+		</fieldset>
+
+		<h3>Actions</h3>
+		<p>Authentication</p>
+		<ul>
+			<li><a href="javascript:login()">Connect Normally</a></li>
+			<li><a href="javascript:loginIncognito()">Connect Anonymously</a></li>
+			<li><a href="javascript:logout()">Disconnect</a></li>
+		</ul>
+
+		<p>Sessions</p>
+		<ul>
+			<li><a href="javascript:createSession()">Create Session</a></li>
+			<li><a href="javascript:joinSession()">Join Session</a></li>
+			<li><a href="javascript:leaveSession()">Leave Session</a></li>
+		</ul>
+		
+	<script src="test.js"></script>
+</body>
+</html>

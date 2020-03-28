@@ -226,7 +226,15 @@ app.get("/stats", function(req, res) {
 // Not for production
 if (isEnabled("test")) {
   app.get("/test", function(req, res) {
-    res.sendFile(path.join(__dirname, "test.html"));
+    res.sendFile(path.join(__dirname, "test/test.html"));
+  });
+
+  app.get("/test.js", function(req, res) {
+    res.sendFile(path.join(__dirname, "test/test.js"));
+  });
+
+  app.get("/test.css", function(req, res) {
+    res.sendFile(path.join(__dirname, "test/test.css"));
   });
 }
 
@@ -315,6 +323,8 @@ io.on("connection", function(socket) {
     var sessionId = hash64();
     var controlLock = validateBoolean(data.controlLock) ? data.controlLock : false;
     while (sessions.hasOwnProperty(sessionId)) sessionId = hash64();
+
+    console.log("User #" + userId + " created session #" + sessionId);
 
     var session = {
       id: sessionId,

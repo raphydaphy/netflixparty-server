@@ -1,0 +1,46 @@
+/* Larger font to suit the cursive style */
+body {
+	font-family: 'Patrick Hand', cursive;
+	background-color: #2d3436;
+	color: #2d3436;
+	font-size: 120%;
+}
+
+h1 {
+	font-size: 150%;
+}
+
+/* Centered area with limited size and top border */
+#container {
+	background-color: #dfe6e9;
+	margin: 50px auto;
+	width: 650px;
+	padding: 30px;
+	border-top: solid;
+	border-color: #636e72;
+	border-width: 10px;
+}
+
+/* Thicker and lighter fieldset border */
+fieldset {
+	border-color: #2d3436;
+	border-width: 2px;
+}
+
+/* Remove link styling and adjust color to fit */
+a {
+	text-decoration: none;
+	color: #74b9ff;
+}
+
+a:visited {
+	color: #6c5ce7;
+}
+
+a:hover {
+	color: #0984e3;
+}
+
+a:active {
+	color: #ff7675;
+}
