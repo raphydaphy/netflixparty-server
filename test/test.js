@@ -11,12 +11,31 @@ window.addEventListener("beforeunload", (event) => {
   if (socket) socket.emit("userDisconnected");
 });
 
+function addMessage(message) {
+  session.messages[message.id] = message;
+  var msgStr = `${users[message.userId].name}: ${message.content}`;
+  if (message.isSystemMsg) {
+    msgStr = `<i>${users[message.userId].name} ${message.content}</i>`;
+  }
+  jQuery("#chat-history").append(`
+    <div class="chat-message" id="msg-${message.id}">
+      ${msgStr}
+    </div>
+  `);
+  jQuery("#chat-history").scrollTop(jQuery("#chat-history").prop("scrollHeight"));
+}
+
 function addSessionUser(id, name) {
   jQuery("#session-users").children("ul").first().append(`<li id="session-user-${id}">${name}</li>`);
 }
 
 function removeSessionUser(id) {
   jQuery("#session-users").children("ul").first().children(`#session-user-${id}`).remove();
+}
+
+function setChatVisible(visible) {
+  jQuery("#main").css("position", visible ? "absolute" : "");
+  jQuery("#chat-container-outer").attr("hidden", !visible);
 }
 
 function endSession() {
@@ -28,6 +47,8 @@ function endSession() {
   jQuery("#session-owner-li").hide();
   jQuery("#session-users").children("ul").first().html("");
   jQuery("#session-users").hide();
+  jQuery("#chat-history").html("");
+  setChatVisible(false);
 }
 
 function initSession(newSession) {
@@ -40,6 +61,8 @@ function initSession(newSession) {
     jQuery("#session-owner").text(session.ownerId);
   }
   jQuery("#session-users").show();
+  setChatVisible(true);
+
   session.users.forEach(sessionUser => {
     if (users[sessionUser].active) {
       addSessionUser(sessionUser, users[sessionUser].name);
@@ -47,6 +70,10 @@ function initSession(newSession) {
       console.log("ignoring inactive user #" + sessionUser);
     }
   });
+
+  for (var messageId in session.messages) {
+    addMessage(session.messages[messageId]);
+  }
 }
 
 function getSessionInfo(context) {
@@ -70,41 +97,38 @@ function initSocket(args) {
   });
 
   socket.on("init", data => {
-    console.debug(`Connected as ${data.userName} with icon ${data.userIcon} and id #${data.userId}!`);
-    userId = data.userId;
-    users[userId] = {
-      id: userId,
-      name: data.userName,
-      icon: data.userIcon,
-      typing: false,
-      active: true
-    }
+    console.debug(`Connected as ${data.user.name} with icon ${data.user.icon} and id #${data.user.id}!`);
+    userId = data.user.id;
+    users[userId] = data.user;
     jQuery("#user-id").text(userId);
-    jQuery("#user-name").text(data.userName);
-    jQuery("#user-icon").text(data.userIcon);
+    jQuery("#user-name").text(data.user.name);
+    jQuery("#user-icon").text(data.user.icon);
   });
 
+  /******************
+   * Session Events *
+   ******************/
+
   socket.on("joinSession", data => {
-    if (!session) return console.error("Recieved join message from user #" + data.userId + " despite not being in a session!");
+    if (!session) return console.error("Recieved join message from user #" + data.user.id + " despite not being in a session!");
 
-    console.debug("User #" + data.userId + " joined the session!");
-    users[data.userId] = {
-      id: data.userId,
-      name: data.userName,
-      icon: data.userIcon,
-      typing: false,
-      active: true
-    };
+    console.debug("User #" + data.user.id + " joined the session!");
+    users[data.user.id] = data.user;
 
-    session.users.push(data.userId);
-    addSessionUser(data.userId, users[data.userId].name);
+    session.users.push(data.user.id);
+    addSessionUser(data.user.id, data.user.name);
+    addMessage(data.message);
   });
 
   socket.on("leaveSession", data => {
-    if (!session) return console.error("Recieved leave message from user #" + data.userId + " despite not being in a session!");
-    if (!session.users.includes(data.userId)) return console.error("User #" + data.userId + " left session that they weren't in");
-    console.debug("User #" + data.userId + " left the session!");
+    if (!session) {
+      return console.error("Recieved leave message from user #" + data.userId + " despite not being in a session!");
+    } else if (!session.users.includes(data.userId)) {
+      return console.error("User #" + data.userId + " left session that they weren't in");
+    }
 
+    console.debug("User #" + data.userId + " left the session!");
+    addMessage(data.message);
     users[data.userId].active = false;
     removeSessionUser(data.userId);
   });
@@ -113,6 +137,19 @@ function initSocket(args) {
     if (reason == "io server disconnect") {
       console.debug("Socket was disconnected by the server");
     }
+  });
+
+  /***************
+   * Chat Events *
+   ***************/
+
+  socket.on("sendMessage", data => {
+    if (!session) {
+      return console.error("Recieved message despite not being in a session", data.message);
+    } else if (!session.users.includes(data.message.userId)) {
+      return console.error("Recieved message from user in a different session", data.message);
+    }
+    addMessage(data.message);
   });
  }
 
@@ -175,3 +212,23 @@ function leaveSession() {
   session = null;
   endSession();
 }
+
+jQuery("#chat-input").keyup(function(e) {
+  e.stopPropagation();
+
+  // 13 = enter key
+  if (e.which === 13) {
+    var msgContent = jQuery("#chat-input").val();
+
+    jQuery("#chat-input").prop("disabled", true);
+    if (msgContent && msgContent.length > 0) {
+      socket.emit("sendMessage", {
+        content: msgContent
+      }, response => {
+        jQuery("#chat-input").val("").prop("disabled", false).focus();
+        if (response.error) return console.warn("Failed to send message:", response.error);
+        addMessage(response.message);
+      });
+    }
+  }
+});

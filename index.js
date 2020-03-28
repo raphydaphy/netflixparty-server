@@ -36,6 +36,15 @@ var users = {};
  *  - videoId (int)
  *  - ownerId (int)
  *  - state (string)
+ *  - messages:
+ *     - id (hash)
+ *     - userId (int)
+ *     - content (string)
+ *     - isSystemMsg (bool)
+ *     - timestamp (int)
+ *     - likes:
+ *        - userId (int)
+ *        - timestamp (int)
  **/
 var sessions = {};
 
@@ -59,6 +68,10 @@ function validateBoolean(boolean) {
   return typeof boolean === "boolean";
 }
 
+function validateString(string) {
+  return typeof string === "string" && string.length > 0;
+}
+
 function validateState(state) {
   return typeof state === "string" && (state === "playing" || state === "paused");
 }
@@ -76,6 +89,14 @@ function getSessionInfoError(userId, videoService, videoId) {
     return "Invalid video ID";
   }
   return null;
+}
+
+function userExists(userId) {
+  return userId && users.hasOwnProperty(userId);
+}
+
+function sessionExists(sessionId) {
+  return sessionId && sessions.hasOwnProperty(sessionId);
 }
 
 /********************
@@ -138,18 +159,20 @@ function getToken(userId, fn) {
 // Tries to remove the specified user from their current session
 // If they were the only active user left, the session is then deleted
 function leaveSession(userId) {
-  if (!userId || !users.hasOwnProperty(userId)) return;
+  if (!userExists(userId)) return;
   var user = users[userId];
   var sessionId = user.sessionId;
+  if (!sessionExists(sessionId)) return;
+  var message = createMessage(userId, "left the session", true);
   user.sessionId = null;
-  if (!sessionId || !sessions.hasOwnProperty(sessionId)) return;
   var session = sessions[sessionId];
   console.debug("User #" + userId + " left their session");
   var sessionUsers = 0;
   session.users.forEach(sessionUser => {
     if (users[sessionUser].sessionId == sessionId) {
       users[sessionUser].socket.emit("leaveSession", {
-        userId: userId
+        userId: userId,
+        message: message
       });
       sessionUsers++;
     }
@@ -162,7 +185,7 @@ function leaveSession(userId) {
 
 function setupUser(socket, id, name, icon) {
   console.debug("User #" + id + " connected");
-  if (users.hasOwnProperty(id)) {
+  if (userExists(id)) {
     var existingUser = users[id];
     if (existingUser.active) {
       console.debug("User #" + id + " opened multiple connections");
@@ -170,7 +193,7 @@ function setupUser(socket, id, name, icon) {
       existingUser.socket.disconnect();
     }
   }
-  users[id] = {
+  var user = {
     id: id,
     name: name,
     icon: icon,
@@ -179,11 +202,49 @@ function setupUser(socket, id, name, icon) {
     sessionId: null,
     socket: socket
   };
+
+  users[id] = user;
   socket.emit("init", {
-    userId: id,
-    userName: name,
-    userIcon: icon
+    user: {
+      id: user.id,
+      name: user.name,
+      icon: user.icon,
+      typing: user.typing,
+      active: user.active
+    }
   });
+}
+
+function createMessage(userId, content, isSystemMsg) {
+  var session = sessions[users[userId].sessionId];
+  var messageId = hash64();
+  while (session.messages.hasOwnProperty(messageId)) messageId = hash64();
+
+  var message = {
+    id: messageId,
+    userId: userId,
+    content: content,
+    isSystemMsg: isSystemMsg,
+    timestamp: Date.now(),
+    likes: {}
+  };
+
+  session.messages[messageId] = message;
+  return message;
+}
+
+function broadcastMessage(userId, content, isSystemMsg, ignoreSender=true) {
+  var message = createMessage(userId, content, isSystemMsg);
+  var session = sessions[users[userId].sessionId];
+  session.users.forEach(sessionUser => {
+    su = users[sessionUser];
+    if ((sessionUser != userId || !ignoreSender) && su.sessionId == session.id) {
+      su.socket.emit("sendMessage", {
+        message: message
+      });
+    }
+  });
+  return message;
 }
 
 /***********************
@@ -318,7 +379,7 @@ io.on("connection", function(socket) {
       setupUser(socket, userId, data.name, data.icon);
     });
   } else {
-    userId = socket.handshake.query.userid;
+    userId = parseInt(socket.handshake.query.userid);
     // Fetch the users icon & name from the database
     var sql = `SELECT name, icon FROM users WHERE id="${userId}"`;
     con.query(sql, function(err, result, fields) {
@@ -327,19 +388,24 @@ io.on("connection", function(socket) {
     });
   }
 
+  /******************
+   * Session Events *
+   ******************/
+
   socket.on("createSession", (data, fn) => {
     var error = getSessionInfoError(userId, data.videoService, data.videoId);
     if (error) return fn({error: error});
 
     var sessionId = hash64();
     var controlLock = validateBoolean(data.controlLock) ? data.controlLock : false;
-    while (sessions.hasOwnProperty(sessionId)) sessionId = hash64();
+    while (sessionExists(sessionId)) sessionId = hash64();
 
     console.debug("User #" + userId + " created session #" + sessionId);
 
     var session = {
       id: sessionId,
       users: [userId],
+      messages: {},
       ownerId: data.controlLock ? userId : null,
       videoService: data.videoService,
       videoId: data.videoId
@@ -348,18 +414,16 @@ io.on("connection", function(socket) {
     users[userId].sessionId = sessionId;
     sessions[sessionId] = session;
 
-    fn({
-      session: session
-    });
+    createMessage(userId, "created the session", true);
+
+    fn({session: session});
   });
 
   socket.on("joinSession", (data, fn) => {
     var error = getSessionInfoError(userId, data.videoService, data.videoId);
     if (error) return fn({error: error});
     var sessionId = data.id;
-    if (!sessionId || !sessions.hasOwnProperty(sessionId)) {
-      return fn({error: "Invalid session ID"});
-    }
+    if (!sessionExists(sessionId)) return fn({error: "Invalid session ID"});
 
     var session = sessions[sessionId];
     if (session.videoService != data.videoService) {
@@ -379,6 +443,8 @@ io.on("connection", function(socket) {
     users[userId].sessionId = sessionId;
     session.users.push(userId);
 
+    var message = createMessage(userId, "joined the session", true);
+
     session.users.forEach(sessionUser => {
       // Collate the existing users' data to send to the new user
       sessionUsers[sessionUser] = {
@@ -391,9 +457,14 @@ io.on("connection", function(socket) {
       // Send the new user's data to existing users
       if (sessionUser != userId && users[sessionUser].sessionId == sessionId) {
         users[sessionUser].socket.emit("joinSession", {
-          userId: userId,
-          userName: users[userId].name,
-          userIcon: users[userId].icon
+          message: message,
+          user: {
+            id: userId,
+            name: users[userId].name,
+            icon: users[userId].icon,
+            typing: users[userId].typing,
+            active: users[userId].active
+          }
         });
       }
     });
@@ -409,11 +480,25 @@ io.on("connection", function(socket) {
   });
 
   socket.on("userDisconnected", () => {
-    if (userId && users.hasOwnProperty(userId)) {
-      leaveSession(userId);
-      users[userId].active = false;
-      console.debug("User #" + userId + " disconnected");
-    }
+    if (!userExists(userId)) return console.debug("Unknown user #" + userId + " tried to disconnect");
+    leaveSession(userId);
+    users[userId].active = false;
+    console.debug("User #" + userId + " disconnected");
+  });
+
+  /***************
+   * Chat Events *
+   ***************/
+
+  socket.on("sendMessage", (data, fn) => {
+    if (!userExists(userId)) return fn({error: "Invalid user ID"});
+    if (!validateString(data.content)) return fn({error: "Invalid message content"});
+    var user = users[userId];
+    if (!sessionExists(user.sessionId)) return fn({error: "Invalid session"});
+
+    var message = broadcastMessage(userId, data.content, data.isSystemMsg || false);
+
+    fn({ message: message });
   });
 });
 

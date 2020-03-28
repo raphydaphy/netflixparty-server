@@ -1,46 +1,137 @@
-/* Larger font to suit the cursive style */
+/****************
+ * Main Styling *
+ ****************/
+
 body {
-	font-family: 'Patrick Hand', cursive;
-	background-color: #2d3436;
-	color: #2d3436;
-	font-size: 120%;
+  font-family: 'Patrick Hand', cursive;
+  background-color: #2d3436;
+  color: #2d3436;
+  font-size: 120%;
 }
 
 h1 {
-	font-size: 150%;
+  font-size: 150%;
 }
 
-/* Centered area with limited size and top border */
+/* Shift the main content to the right when chat is open */
+#main {
+  right: 288px;
+  left: 0;
+  position: auto;
+}
+
 #container {
-	background-color: #dfe6e9;
-	margin: 50px auto;
-	width: 650px;
-	padding: 30px;
-	border-top: solid;
-	border-color: #636e72;
-	border-width: 10px;
+  background-color: #dfe6e9;
+  margin: 50px auto;
+  width: 650px;
+  padding: 30px;
+  border-top: solid;
+  border-color: #636e72;
+  border-width: 10px;
 }
 
 /* Thicker and lighter fieldset border */
 fieldset {
-	border-color: #2d3436;
-	border-width: 2px;
+  border-color: #2d3436;
+  border-width: 2px;
 }
 
 /* Remove link styling and adjust color to fit */
 a {
-	text-decoration: none;
-	color: #74b9ff;
+  text-decoration: none;
+  color: #74b9ff;
 }
 
 a:visited {
-	color: #6c5ce7;
+  color: #6c5ce7;
 }
 
 a:hover {
-	color: #0984e3;
+  color: #0984e3;
 }
 
 a:active {
-	color: #ff7675;
+  color: #ff7675;
+}
+
+/****************
+ * Chat Styling *
+ ****************/
+
+#chat-container-outer {
+  width: 288px;
+  height: 100%;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  cursor: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  z-index: 9999999999;
+  background-color: #dfe6e9;
+}
+
+#chat-container {
+  width: 251px;
+  height: 100%;
+  padding: 14px 18.5px;
+}
+
+#chat-history-outer {
+  width: 100%;
+  height: calc(100% - 195px);
+  padding-bottom: 20px;
+  margin-top: 15px;
+  position: relative;
+  overflow: hidden;
+}
+
+#chat-header {
+  width: 100%;
+  height: 30px;
+  display: flex;
+  flex-flow: wrap row;
+  z-index: 1;
+  align-items: flex-start;
+  position: relative;
+}
+
+#chat-history {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-flow: column;
+  position: relative;
+  justify-content: flex-start;
+  overflow: auto;
+  max-height: 100%;
+}
+
+#chat-history > :first-child {
+  margin-top: auto !important;
+}
+
+.chat-message {
+  display: flex;
+  flex-flow: wrap row;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 6px 0;
+  width: 100%;
+}
+
+#chat-input-container {
+  width: 100%;
+}
+/* line 123, ../sass/modules/_msg.scss */
+#chat-input-container #chat-input {
+  font-size: 13px;
+  font-weight: 500;
+  width: 100%;
+  padding-top: 10px;
+  background: none;
+  border: none;
+  outline: none;
+  border-bottom: 1.2px solid;
 }
