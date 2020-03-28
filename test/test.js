@@ -124,6 +124,10 @@ function updateName(id, name) {
   jQuery("#session-user-" + id).text(name);
 }
 
+function updateIcon(id, icon) {
+  users[id].icon = icon;
+}
+
 function addSessionUser(id, name) {
   jQuery("#session-users").children("ul").first().append(`<li id="session-user-${id}">${name}</li>`);
 }
@@ -281,6 +285,13 @@ function initSocket(args) {
     addMessage(data.message);
     updateName(data.userId, data.name);
   });
+
+  socket.on("changeIcon", data => {
+    var userStatus = getUserStatus(data.userId);
+    if (userStatus.error) return console.warn("Recieved invalid icon change:", userStatus.error);
+    addMessage(data.message);
+    updateIcon(data.userId, data.icon);
+  });
  }
 
 function login() {
@@ -313,14 +324,27 @@ function changeName() {
     name: name
   }, response => {
     if (response.error) return console.warn("Failed to change name:", response.error);
-    console.debug("Changed name from " + users[userId].name + " to " + name);
+    console.debug("Changed name from " + users[userId].name + " to " + response.name);
     if (session) addMessage(response.message);
     updateName(userId, response.name);
   });
 }
 
 function changeIcon() {
-
+  var icon = jQuery("#user-icon").val().replace(/^\s+|\s+$/g, "");
+  if (!socket) {
+    return console.warn("Can't change icon when not logged in!");
+  } else if (icon == users[userId].icon) {
+    return console.warn("The new icon must be different in order to change");
+  }
+  socket.emit("changeIcon", {
+    icon: icon
+  }, response => {
+    if (response.error) return console.warn("Failed to change icon:", response.error);
+    console.debug("Changed icon from " + users[userId].icon + " to " + icon);
+    if (session) addMessage(response.message);
+    updateIcon(userId, response.icon);
+  });
 }
 
 function createSession() {

@@ -576,14 +576,14 @@ io.on("connection", (socket) => {
   });
 
   socket.on("changeName", (data, fn) => {
-    if (!userExists(userId)) return console.debug("Invalid user ID");
-    if (!validateString(data.name)) return console.debug("Invalid name: " + data.name);
+    if (!userExists(userId)) return fn({error: "Invalid user ID"});
+    if (!validateString(data.name)) return fn({error: "Invalid name"});
 
     var user = users[userId];
     var session = getSession(userId);
     var message;
 
-    user.name = data.name;
+    user.name = data.name.substring(0, 16);;
     if (!session.error) {
       message = createMessage(userId, "changed their name", true);
     }
@@ -606,6 +606,44 @@ io.on("connection", (socket) => {
         users[sessionUser].socket.emit("changeName", {
           userId: user.id,
           name: user.name,
+          message: message
+        });
+      }
+    });
+  });
+
+  // TODO: deduplication here ?
+  socket.on("changeIcon", (data, fn) => {
+    if (!userExists(userId)) return fn({error: "Invalid user ID"});
+    if (!icons.includes(data.icon)) return fn({error: "Invalid icon"});
+
+    var user = users[userId];
+    var session = getSession(userId);
+    var message;
+
+    user.icon = data.icon;
+    if (!session.error) {
+      message = createMessage(userId, "changed their icon", true);
+    }
+
+    var sql = `UPDATE users SET icon="${user.icon}" WHERE id="${userId}";`;
+    con.query(sql, (err, result) => {
+      if (err) throw err;
+      console.debug("Changed user #" + userId + "'s icon to " + user.icon);
+    });
+
+    fn({
+      icon: user.icon,
+      message: message
+    });
+
+    if (session.error) return;
+
+    session.users.forEach(sessionUser => {
+      if (sessionUser != user.id && users[sessionUser].sessionId == session.id) {
+        users[sessionUser].socket.emit("changeIcon", {
+          userId: user.id,
+          icon: user.icon,
           message: message
         });
       }
