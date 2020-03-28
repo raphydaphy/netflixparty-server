@@ -11,6 +11,35 @@ window.addEventListener("beforeunload", (event) => {
   if (socket) socket.emit("userDisconnected");
 });
 
+function removeLike(data) {
+  if (!users.hasOwnProperty(data.userId)) {
+    console.warn("Tried toremove like from unknown user " + data.userId + " for message with id " + data.msgId);
+    return;
+  } else if (!session.messages.hasOwnProperty(data.msgId)) {
+    console.warn("User " + data.userId + " tried to unlike unknown message " + data.msgId);
+    return;
+  }
+
+  var msg = session.messages[data.msgId];
+  delete msg.likes[data.userId];
+
+  var likesHtml = jQuery("#msg-" + msg.id).children(".liked-by");
+  if (Object.keys(msg.likes).length > 0) {
+    var likesString;
+    for (var like in msg.likes) {
+      var name = users[like].name;
+      if (likesString) {
+        likesString += " and " + name;
+      } else {
+        likesString = "Liked by " + name;
+      }
+    }
+    likesHtml.text(likesString);
+  } else {
+    likesHtml.remove();
+  }
+}
+
 function addLike(data, updateArray=true) {
   if (!users.hasOwnProperty(data.userId)) {
     console.warn("Recieved like from unknown user " + data.userId + " for message with id " + data.msgId);
@@ -32,20 +61,12 @@ function addLike(data, updateArray=true) {
   var msgHtml = jQuery("#msg-" + msg.id);
   var userName = users[data.userId].name;
 
-  if (msgHtml.children("font")) {
-    msgHtml.children("font").first().append(" and " + userName)
+  if (msgHtml.children(".liked-by").length > 0) {
+    msgHtml.children(".liked-by").first().append(" and " + userName)
   } else {
     msgHtml.append(`
-    <font size="1">Liked by ${users[data.userId].name}</font>
+    <font class="liked-by" size="1">Liked by ${users[data.userId].name}</font>
   `);
-  }
-}
-
-function likeMessage(message) {
-  if (!message.likes.hasOwnProperty(userId) && !message.isSystemMsg) {
-    socket.emit("likeMessage", {
-      msgId: message.id
-    });
   }
 }
 
@@ -69,7 +90,19 @@ function addMessage(message) {
   }
 
   jQuery("#chat-history").scrollTop(jQuery("#chat-history").prop("scrollHeight"));
-  jQuery("#msg-" + message.id).dblclick(e => likeMessage(message));
+  jQuery("#msg-" + message.id).dblclick(e => {
+    if (message.isSystemMsg) return;
+    // For simpler testing, liking a previously liked message will remove the like
+    if (message.likes.hasOwnProperty(userId)) {
+      socket.emit("unlikeMessage", {
+        msgId: message.id
+      });
+    } else {
+      socket.emit("likeMessage", {
+        msgId: message.id
+      });
+    }
+  });
 }
 
 function addSessionUser(id, name) {
@@ -201,6 +234,10 @@ function initSocket(args) {
 
   socket.on("likeMessage", function(data) {
     addLike(data);
+  });
+
+  socket.on("unlikeMessage", function(data) {
+    removeLike(data);
   });
  }
 

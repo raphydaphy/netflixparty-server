@@ -247,6 +247,19 @@ function broadcastMessage(userId, content, isSystemMsg, ignoreSender=true) {
   return message;
 }
 
+function getMessageInfo(userId, msgId) {
+  if (!userExists(userId)) return {error: "Invalid user ID"};
+  var user = users[userId];
+  if (!sessionExists(user.sessionId)) return {error: "Invalid session"};
+  var session = sessions[user.sessionId];
+  if (!session.messages.hasOwnProperty(msgId)) return {error: "Invalid message"};
+  return {
+    user: user,
+    session: session,
+    message: session.messages[msgId]
+  };
+}
+
 /***********************
  * Database Connection *
  ***********************/
@@ -505,31 +518,39 @@ io.on("connection", function(socket) {
   });
 
   socket.on("likeMessage", function(data) {
-    if (!userExists(userId)) return fn({error: "Invalid user ID"});
-    var user = users[userId];
-    if (!sessionExists(user.sessionId)) return fn({error: "Invalid session"});
-    var session = sessions[user.sessionId];
-    if (!session.messages.hasOwnProperty(data.msgId)) {
-      console.warn("User " + userId + " tried to like invalid message " + data.msgId);
-      return;
-    }
+    var info = getMessageInfo(userId, data.msgId);
+    if (info.error) return console.debug("Failed to like message:", info.error);
     var timestamp = Date.now();
-    var msg = session.messages[data.msgId];
-    if (msg.likes.hasOwnProperty(userId)) {
-      var name = users[userId].name;
-      console.log("User " + name + " tried to like a message they had already liked (with " + Object.keys(msg.likes).length + ") total likes", msg.likes);
-      return;
+    if (info.message.likes.hasOwnProperty(userId)) {
+      return console.debug("User #" + userId + " tried to like a message they had already liked");
     }
-    msg.likes[userId] = {
+    info.message.likes[userId] = {
       userId: userId,
       timestamp: timestamp
     };
-    session.users.forEach(sessionUser => {
-      if (users[sessionUser].sessionId == session.id) {
+    info.session.users.forEach(sessionUser => {
+      if (users[sessionUser].sessionId == info.session.id) {
         users[sessionUser].socket.emit("likeMessage", {
           msgId: data.msgId,
           userId: userId,
           timestamp: timestamp
+        });
+      }
+    });
+  });
+
+  socket.on("unlikeMessage", function(data) {
+    var info = getMessageInfo(userId, data.msgId);
+    if (info.error) return console.debug("Failed to unlike message:", info.error);
+    if (!info.message.likes.hasOwnProperty(userId)) {
+      return console.debug("User #" + userId + " tried to unlike a message that they hadn't already liked");
+    }
+    delete info.message.likes[userId];
+    info.session.users.forEach(sessionUser => {
+      if (users[sessionUser].sessionId == info.session.id) {
+        users[sessionUser].socket.emit("unlikeMessage", {
+          msgId: data.msgId,
+          userId: userId
         });
       }
     });
