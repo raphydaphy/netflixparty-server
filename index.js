@@ -32,9 +32,39 @@ var users = {};
  * Session:
  *  - id (hash)
  *  - users (int[])
+ *  - videoService (string)
+ *  - ownerId (int)
  *  - videoId (int)
  **/
 var sessions = {};
+
+/*******************
+ * Data Validation *
+ *******************/
+
+function validateHash(id) {
+  return typeof id === 'string' && id.length === 16;
+}
+
+function validateLastKnownTime(lastKnownTime) {
+  return typeof lastKnownTime === 'number' && astKnownTime % 1 === 0 && lastKnownTime >= 0;
+}
+
+function validateTimestamp(timestamp) {
+  return typeof timestamp === 'number' && timestamp % 1 === 0 && timestamp >= 0;
+}
+
+function validateBoolean(boolean) {
+  return typeof boolean === 'boolean';
+}
+
+function validateState(state) {
+  return typeof state === 'string' && (state === 'playing' || state === 'paused');
+}
+
+function validateVideoId(videoId) {
+  return typeof videoId === 'number' && videoId % 1 === 0 && videoId >= 0;
+}
 
 /********************
  * Helper Functions *
@@ -82,15 +112,62 @@ function createUser(name, fn) {
 }
 
 function getToken(userId, fn) {
-  if (userId == undefined) return fn(undefined);
+  if (!userId) return fn(null);
   var sql = `SELECT token FROM users WHERE id="${userId}"`;
   con.query(sql, function(err, result, fields) {
     if (err) throw err;
     if (result.length > 0) {
       return fn(result[0].token);
     }
-    fn(undefined);
+    fn(null);
   });
+}
+
+function setupUser(socket, id, name, icon) {
+  console.debug("User #" + id + " connected");
+  if (users.hasOwnProperty(id)) {
+    var existingUser = users[id];
+    if (existingUser.active) {
+      console.debug("User #" + id + " made multiple connections. Fixing...");
+      leaveSession(id);
+      existingUser.socket.disconnect();
+    }
+  }
+  users[id] = {
+    id: id,
+    name: name,
+    icon: icon,
+    typing: false,
+    active: true,
+    sessionId: null,
+    socket: socket
+  };
+  socket.emit("init", {
+    userId: id,
+    userName: name,
+    userIcon: icon
+  });
+}
+
+function leaveSession(userId) {
+  if (!userId || !users.hasOwnProperty(userId)) return;
+  var user = users[userId];
+  var sessionId = user.sessionId;
+  user.sessionId = null;
+  if (!sessionId || !sessions.hasOwnProperty(sessionId)) return;
+  var session = sessions[sessionId];
+  console.debug("User #" + userId + " left their session");
+  var sessionUsers = 0;
+  for (var sessionUser in session.users) {
+    if (users[sessionUser].sessionId == sessionId) {
+      sessionUsers++;
+    }
+    // TODO: broadcast "user left"
+  }
+  if (sessionUsers == 0) {
+    console.debug("Everyone has left session #" + sessionId + ", deleting");
+    delete sessions[sessionId];
+  }
 }
 
 /***********************
@@ -139,6 +216,13 @@ app.get("/", function(req, res) {
   res.end("OK");
 });
 
+app.get("/stats", function(req, res) {
+  res.send({
+    "users": Object.keys(users).length,
+    "sessions": Object.keys(sessions).length
+  });
+});
+
 // Not for production
 if (isEnabled("test")) {
   app.get("/test", function(req, res) {
@@ -154,11 +238,11 @@ app.post("/validate-token", function(req, res) {
   var userId = req.body.userid;
   var token = req.body.token;
 
-  if (userId == undefined) return res.send({result: "missing-user"});
-  if (token == undefined) return res.send({result: "missing-token"});
+  if (!userId) return res.send({result: "missing-user"});
+  if (!token) return res.send({result: "missing-token"});
 
   getToken(userId, function(realToken) {
-    if (realToken == undefined) return res.send({result: "invalid-user"});
+    if (!realToken) return res.send({result: "invalid-user"});
     if (realToken == token) return res.send({result: "success"});
     return res.send({result: "invalid-token"});
   });
@@ -183,12 +267,12 @@ io.use((socket, next) => {
   var id = socket.handshake.query.userid;
   var token = socket.handshake.query.token;
 
-  if (id == undefined || token == undefined) {
+  if (!id || !token) {
     console.log("Recieved connection with missing credentials");
     return next(new Error("Missing credentials"));
   }
   getToken(id, function(realToken) {
-    if (realToken == undefined) {
+    if (!realToken) {
       console.log(`Recieved connection from invalid user #${id}`);
       return next(new Error("Invalid user"));
     }
@@ -202,16 +286,12 @@ io.on("connection", function(socket) {
   var userId;
 
   if (socket.handshake.query.incognito == "true") {
-    createUser(undefined, data => {
+    createUser(null, data => {
       if (data.error) {
         return console.warn("Failed to create temporary incognito account!", data.error);
       }
       userId = data.id;
-      socket.emit("init", {
-        userId: userId,
-        userName: data.name,
-        userIcon: data.icon
-      });
+      setupUser(socket, userId, data.name, data.icon);
     });
   } else {
     userId = socket.handshake.query.userid;
@@ -219,13 +299,57 @@ io.on("connection", function(socket) {
     var sql = `SELECT name, icon FROM users WHERE id="${userId}"`;
     con.query(sql, function(err, result, fields) {
       if (err) throw err;
-      socket.emit("init", {
-        userId: userId,
-        userName: result[0].name,
-        userIcon: result[0].icon
-      });
+      setupUser(socket, userId, result[0].name, result[0].icon);
     });
   }
+
+  socket.on("createSession", (data, fn) => {
+    if (!userId || !users.hasOwnProperty(userId)) {
+      return fn({error: "Invalid user ID"});
+    } else if (data.videoService != "netflix") {
+      return fn({error: "Unsupported video service"});
+    } else if (!validateVideoId(data.videoId)) {
+      return fn({error: "Invalid video ID"});
+    }
+
+    var sessionId = hash64();
+    var controlLock = validateBoolean(data.controlLock) ? data.controlLock : false;
+    while (sessions.hasOwnProperty(sessionId)) sessionId = hash64();
+
+    var session = {
+      id: sessionId,
+      users: {},
+      ownerId: data.controlLock ? userId : null,
+      videoService: data.videoService,
+      videoId: data.videoId
+    };
+
+    session.users[userId] = {
+      id: userId
+    };
+
+    users[userId].sessionId = sessionId;
+    sessions[sessionId] = session;
+
+    fn({
+      sessionId: session.id,
+      ownerId: session.ownerId,
+      videoService: session.videoService,
+      videoId: session.videoId
+    })
+  });
+
+  socket.on("leaveSession", () => {
+    leaveSession(userId);
+  });
+
+  socket.on("userDisconnected", () => {
+    if (userId && users.hasOwnProperty(userId)) {
+      leaveSession(userId);
+      users[userId].active = false;
+      console.debug("User #" + userId + " disconnected");
+    }
+  });
 });
 
 /**************
