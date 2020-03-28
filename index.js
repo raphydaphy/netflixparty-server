@@ -313,10 +313,6 @@ if (isEnabled("test")) {
   app.get("/test.css", function(req, res) {
     res.sendFile(path.join(__dirname, "test/test.css"));
   });
-
-  app.get("/icon.svg", function(req, res) {
-    res.sendFile(path.join(__dirname, "test/icon.svg"));
-  });
 }
 
 app.post("/create-user", function(req,res) {
