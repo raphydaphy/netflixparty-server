@@ -766,11 +766,39 @@ io.on("connection", (socket) => {
     };
 
     fn({message: message}, updateData);
-    console.debug("User " + userId + " updated session " + users[userId].sessionId + " with time " + data.lastKnownTime + " and state " + data.state + " for epoch " + JSON.stringify(data.lastKnownTimeUpdatedAt) + '.');
+    //console.debug("User " + userId + " updated session " + users[userId].sessionId + " with time " + data.lastKnownTime + " and state " + data.state + " for epoch " + JSON.stringify(data.lastKnownTimeUpdatedAt) + '.');
 
     session.users.forEach(sessionUser => {
       if (sessionUser != userId && users[sessionUser].sessionId == session.id) {
         users[sessionUser].socket.emit("updateSession", updateData);
+      }
+    });
+  });
+
+  socket.on("changeVideoId", (data, fn) => {
+    var session = getSession(userId);
+    if (session.error) return fn({error: session.error});
+    if (session.ownerId && session.ownerId != userId) {
+      return fn({error:"Control lock is enabled"});
+    }
+    if (!validateVideoId(data.newVideoId)) return fn({error: "Invalid video ID"});
+
+    //console.debug("User #" + userId + " requested to change video from " + session.videoId + " to " + data.newVideoId);
+
+    // The new episode is already playing
+    if (data.newVideoId == session.videoId) return;
+
+    var message = createMessage(userId, "started the next episode", true);
+    session.videoId = data.newVideoId;
+
+    fn({message: message});
+
+    session.users.forEach(sessionUser => {
+      if (sessionUser != userId && users[sessionUser].sessionId == session.id) {
+        users[sessionUser].socket.emit("changeVideoId", {
+          newVideoId: session.videoId,
+          message: message
+        });
       }
     });
   });
