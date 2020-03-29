@@ -16,6 +16,9 @@ app.use(express.json())
 const usernames = ["James", "Hannah", "Tracy", "Bob", "Troy", "George", "Eve"];
 const icons = ["Batman", "DeadPool", "CptAmerica", "Wolverine", "IronMan", "Goofy", "Alien", "Mulan", "Snow-White", "Poohbear", "Sailormoon", "Sailor-Cat", "Pizza", "Cookie", "Chocobar", "hotdog", "Hamburger", "Popcorn", "IceCream", "ChickenLeg"];
 
+// Possible playback states (serverside)
+const states = {playing: "playing", paused: "paused"};
+
 /**
  * User:
  *  - id (int)
@@ -23,6 +26,7 @@ const icons = ["Batman", "DeadPool", "CptAmerica", "Wolverine", "IronMan", "Goof
  *  - icon (string)
  *  - typing (bool)
  *  - active (bool)
+ *  - buffering (bool)
  *  - sessionId (hash)
  *  - socket (<socket>)
  **/
@@ -36,6 +40,9 @@ var users = {};
  *  - videoId (int)
  *  - ownerId (int)
  *  - state (string)
+ *  - syncFromEnd (bool)
+ *  - lastKnownTime (timestamp)
+ *  - lastKnownTimeUpdatedAt (timestamp)
  *  - messages:
  *     - id (hash)
  *     - userId (int)
@@ -56,12 +63,8 @@ function validateHash(id) {
   return typeof id === "string" && id.length === 16;
 }
 
-function validateLastKnownTime(lastKnownTime) {
-  return typeof lastKnownTime === "number" && astKnownTime % 1 === 0 && lastKnownTime >= 0;
-}
-
-function validateTimestamp(timestamp) {
-  return typeof timestamp === "number" && timestamp % 1 === 0 && timestamp >= 0;
+function validateUInt(uint) {
+  return typeof uint === "number" && uint % 1 === 0 && uint >= 0;
 }
 
 function validateBoolean(boolean) {
@@ -73,11 +76,19 @@ function validateString(string) {
 }
 
 function validateState(state) {
-  return typeof state === "string" && (state === "playing" || state === "paused");
+  return typeof state === "string" && states.hasOwnProperty(state);
 }
 
 function validateVideoId(videoId) {
   return typeof videoId === "number" && videoId % 1 === 0 && videoId >= 0;
+}
+
+function padIntegerWithZeros(x, minWidth) {
+  var numStr = String(x);
+  while (numStr.length < minWidth) {
+    numStr = '0' + numStr;
+  }
+  return numStr;
 }
 
 function getSessionInfoError(userId, videoService, videoId) {
@@ -198,6 +209,7 @@ function setupUser(socket, id, name, icon) {
     name: name,
     icon: icon,
     typing: false,
+    buffering: false,
     active: true,
     sessionId: null,
     socket: socket
@@ -210,6 +222,7 @@ function setupUser(socket, id, name, icon) {
       name: user.name,
       icon: user.icon,
       typing: user.typing,
+      buffering: user.buffering,
       active: user.active
     }
   });
@@ -263,6 +276,20 @@ function getMessageInfo(userId, msgId) {
     session: session,
     message: session.messages[msgId]
   };
+}
+
+function updateBufferingStatus(userId, buffering) {
+  var session = getSession(userId);
+  if (session.error) return console.warn("Recieved invalid buffering status:", session.error);
+  users[userId].buffering = buffering;
+  session.users.forEach(sessionUser => {
+    if (sessionUser != userId && users[sessionUser].sessionId == session.id) {
+      users[sessionUser].socket.emit("buffering", {
+        userId: userId,
+        buffering: buffering
+      });
+    }
+  });
 }
 
 /***********************
@@ -426,7 +453,11 @@ io.on("connection", (socket) => {
       messages: {},
       ownerId: data.controlLock ? userId : null,
       videoService: data.videoService,
-      videoId: data.videoId
+      videoId: data.videoId,
+      state: states.paused,
+      syncFromEnd: false,
+      lastKnownTime: 0,
+      lastKnownTimeUpdatedAt: Date.now()
     };
 
     users[userId].sessionId = sessionId;
@@ -473,6 +504,7 @@ io.on("connection", (socket) => {
         name: users[sessionUser].name,
         icon: users[sessionUser].icon,
         typing: users[sessionUser].typing,
+        buffering: users[sessionUser].buffering,
         active: users[sessionUser].active
       }
       // Send the new user's data to existing users
@@ -484,6 +516,7 @@ io.on("connection", (socket) => {
             name: users[userId].name,
             icon: users[userId].icon,
             typing: users[userId].typing,
+            buffering: users[userId].buffering,
             active: users[userId].active
           }
         });
@@ -646,6 +679,98 @@ io.on("connection", (socket) => {
           icon: user.icon,
           message: message
         });
+      }
+    });
+  });
+
+  /*********************
+   * Video Sync Events *
+   *********************/
+
+  socket.on("getServerTime", (data, fn) => {
+    var version = data.version;
+    fn({serverTime: Date.now()});
+  });
+
+  socket.on("buffering", (data, fn) => {
+    updateBufferingStatus(userId, data.buffering);
+  });
+
+  socket.on("updateSession", (data, fn) => {
+    var session = getSession(userId);
+    if (session.error) return fn({error:session.error});
+    if (!validateUInt(data.lastKnownTime)) return fn({error:"Invalid lastKnownTime"});
+    if (!validateUInt(data.lastKnownTimeUpdatedAt)) return fn({error:"Invalid lastKnownTimeUpdatedAt"});
+    if (!validateState(data.state)) return fn ({error:"Invalid state"});
+
+    updateBufferingStatus(userId, data.buffering);
+
+    if (session.ownerId && session.ownerId != userId) {
+      return fn({error:"Control lock is enabled"});
+    }
+
+    var now = Date.now();
+    var oldPredictedTime = session.lastKnownTime +
+      (session.state === states.paused ? 0 : (
+        now - session.lastKnownTimeUpdatedAt
+      ));
+    var newPredictedTime = data.lastKnownTime +
+      (data.state === states.paused ? 0 : (
+        now - data.lastKnownTimeUpdatedAt
+      ));
+
+    var stateUpdated = session.state !== data.state;
+    var timeUpdated = Math.abs(newPredictedTime - oldPredictedTime) > 2500;
+
+    var hours = Math.floor(newPredictedTime / (1000 * 60 * 60));
+    newPredictedTime -= hours * 1000 * 60 * 60;
+    var minutes = Math.floor(newPredictedTime / (1000 * 60));
+    newPredictedTime -= minutes * 1000 * 60;
+    var seconds = Math.floor(newPredictedTime / 1000);
+    newPredictedTime -= seconds * 1000;
+
+    var timeStr;
+    if (hours > 0) {
+      timeStr = String(hours) + ':' + String(minutes) + ':' + padIntegerWithZeros(seconds, 2);
+    } else {
+      timeStr = String(minutes) + ':' + padIntegerWithZeros(seconds, 2);
+    }
+
+    session.lastKnownTime = data.lastKnownTime;
+    session.lastKnownTimeUpdatedAt = data.lastKnownTimeUpdatedAt;
+    session.state = data.state;
+
+    var message;
+
+    if (stateUpdated && timeUpdated) {
+      if (data.state === states.playing) {
+        message = createMessage(userId, "started playing the video at " + timeStr, true);
+      } else {
+        console.log("paused");
+        message = createMessage(userId, "paused the video at " + timeStr, true);
+      }
+    } else if (stateUpdated) {
+      if (data.state === states.playing) {
+        message = createMessage(userId, "started playing the video", true);
+      } else {
+        message = createMessage(userId, "paused the video", true);
+      }
+    } else if (timeUpdated) {
+      message = createMessage(userId, "jumped to " + timeStr, true);
+    }
+
+    var updateData = {
+      lastKnownTime: session.lastKnownTime,
+      lastKnownTimeUpdatedAt: session.lastKnownTimeUpdatedAt,
+      state: session.state
+    };
+
+    fn({message: message}, updateData);
+    console.debug("User " + userId + " updated session " + users[userId].sessionId + " with time " + data.lastKnownTime + " and state " + data.state + " for epoch " + JSON.stringify(data.lastKnownTimeUpdatedAt) + '.');
+
+    session.users.forEach(sessionUser => {
+      if (sessionUser != userId && users[sessionUser].sessionId == session.id) {
+        users[sessionUser].socket.emit("updateSession", updateData);
       }
     });
   });
